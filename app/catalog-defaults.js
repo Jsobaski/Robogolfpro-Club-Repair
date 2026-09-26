@@ -82,6 +82,11 @@
   var DEFAULT_SETTINGS = {
     // Clark County, NV combined rate (4.6% state + 3.775% local), effective 2020-01-01.
     taxRate: 8.375,
+    // Order tag: 'sheet' = printed on regular Letter paper and cut out,
+    // 'label' = a label printer using labelWidth x labelHeight inches.
+    tagFormat: 'sheet',
+    labelWidth: 2.25,
+    labelHeight: 1.25,
     footer: 'Thank you for choosing RoboGolfPro Las Vegas! Repair labor is separately stated and not subject to Nevada sales tax.'
   };
 

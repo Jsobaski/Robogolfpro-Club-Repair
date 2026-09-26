@@ -3,6 +3,7 @@
   'use strict';
 
   var P = window.Pricing;
+  var X = window.TicketExtras;
   var money = P.formatMoney;
 
   function clone(o) { return o === undefined ? o : JSON.parse(JSON.stringify(o)); }
@@ -26,7 +27,10 @@
   }
 
   function newDraft() {
-    return { id: null, number: null, createdAt: null, customer: { name: '', phone: '', email: '' }, notes: '', lines: [] };
+    return {
+      id: null, number: null, createdAt: null, customer: { name: '', phone: '', email: '' }, notes: '', lines: [],
+      readyBy: '', readyTime: '', payment: X.newPayment()
+    };
   }
 
   // ---------------------------------------------------------------- state
@@ -269,6 +273,7 @@
     chev: '<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m1.5 1.5 5 5-5 5"/></svg>',
     link: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 1v5a2 2 0 0 0 2 2h6"/><path d="m8 6 2 2-2 2"/></svg>',
     print: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
   };
 
@@ -357,16 +362,19 @@
             '<div class="group" id="lines"></div>' +
             '<div class="group-title">Notes</div>' +
             '<div class="group"><textarea class="notes" data-bind="draft:notes" placeholder="Club details, lengths, special instructions…">' + esc(d.notes) + '</textarea></div>' +
+            '<div id="payGroup"></div>' +
           '</div>' +
           '<div class="totals" id="totals"></div>' +
           '<div class="ticket-actions">' +
             '<button class="btn" data-action="new-ticket">Clear</button>' +
-            '<button class="btn primary" data-action="print-ticket">' + ICON.print + 'Print</button>' +
+            '<button class="btn" data-action="print-tags">' + ICON.tag + 'Tag</button>' +
+            '<button class="btn primary" data-action="print-ticket">' + ICON.print + 'Invoice</button>' +
           '</div>' +
         '</div>' +
       '</div>';
     renderChips();
     renderGrid();
+    renderPayment();
     renderLines();
   }
 
@@ -447,7 +455,9 @@
       '<div class="t"><span>Parts</span><span>' + money(c.partsTotal) + '</span></div>' +
       '<div class="t"><span>Labor</span><span>' + money(c.laborTotal) + '</span></div>' +
       '<div class="t"><span>Sales tax (' + c.taxRate + '% on ' + money(c.taxableSubtotal) + ')</span><span>' + money(c.tax) + '</span></div>' +
-      '<div class="t grand"><span>Total</span><span>' + money(c.total) + '</span></div>';
+      '<div class="t grand"><span>Total</span><span>' + money(c.total) + '</span></div>' +
+      paymentTotalsHTML(c.total);
+    updatePayCalc(c.total);
   }
 
   function rowDetail(r) {
@@ -600,6 +610,64 @@
     });
   }
 
+  // ---------------- pickup & payment
+  function segmented(action, current, options) {
+    return '<div class="segmented seg-full">' + options.map(function (o) {
+      return '<button class="' + (o[0] === current ? 'active' : '') + '" data-action="' + action + '" data-v="' + o[0] + '">' + esc(o[1]) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function renderPayment() {
+    var el = document.getElementById('payGroup');
+    if (!el) return;
+    var d = S.draft, pay = d.payment;
+    var today = new Date();
+    function plus(n) { var x = new Date(today); x.setDate(x.getDate() + n); return X.ymd(x); }
+    var h = '<div class="group-title">Pickup</div><div class="group">' +
+      '<div class="row"><label>Ready</label><input type="date" class="field" data-bind="draft:readyBy" value="' + esc(d.readyBy) + '"></div>' +
+      '<div class="row"><label>Time</label><input type="time" class="field" data-bind="draft:readyTime" value="' + esc(d.readyTime) + '"></div>' +
+      '<div class="row quick">' +
+        '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(0) + '">Today</button>' +
+        '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(1) + '">Tomorrow</button>' +
+        '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(3) + '">3 days</button>' +
+        '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(7) + '">1 week</button>' +
+        (d.readyBy ? '<button class="btn plain small" data-action="ready-quick" data-v="" aria-label="Clear date">✕</button>' : '') +
+      '</div>' +
+    '</div>';
+    h += '<div class="group-title">Payment</div><div class="group pay">' +
+      '<div class="row">' + segmented('pay-status', pay.status, [['due', 'Due at pickup'], ['paid', 'Paid'], ['deposit', 'Deposit']]) + '</div>';
+    if (pay.status !== 'due') {
+      h += '<div class="row">' + segmented('pay-method', pay.method, [['card', 'Card'], ['cash', 'Cash'], ['other', 'Other']]) + '</div>';
+    }
+    if (pay.status === 'paid' && pay.method === 'cash') {
+      h += '<div class="row"><label>Cash received</label><input type="number" step="0.01" min="0" data-bind="draft:payment.tendered" placeholder="Optional" value="' + esc(pay.tendered) + '"></div>';
+    }
+    if (pay.status === 'deposit') {
+      h += '<div class="row"><label>Deposit</label><input type="number" step="0.01" min="0" data-bind="draft:payment.deposit" placeholder="0.00" value="' + esc(pay.deposit) + '"></div>';
+    }
+    h += '<div class="row pay-calc" id="payCalc"></div></div>';
+    el.innerHTML = h;
+  }
+
+  function updatePayCalc(totalCents) {
+    var el = document.getElementById('payCalc');
+    if (!el) return;
+    var sm = X.paymentSummary(S.draft.payment, totalCents);
+    var txt;
+    if (sm.warning) txt = '<span class="warn">' + esc(sm.warning) + '</span>';
+    else if (sm.status === 'paid') txt = sm.changeDue ? 'Change due: <strong>' + money(sm.changeDue) + '</strong>' : 'Paid in full';
+    else if (sm.status === 'deposit') txt = 'Balance due at pickup: <strong>' + money(sm.balanceDue) + '</strong>';
+    else txt = 'Customer pays <strong>' + money(sm.balanceDue) + '</strong> at pickup';
+    el.innerHTML = '<span class="small">' + txt + '</span>';
+  }
+
+  function paymentTotalsHTML(totalCents) {
+    var sm = X.paymentSummary(S.draft.payment, totalCents);
+    if (sm.status === 'due' || !totalCents) return '';
+    return (sm.paid ? '<div class="t"><span>' + esc(sm.label) + '</span><span>−' + money(sm.paid) + '</span></div>' : '') +
+      '<div class="t"><span><strong>Balance due</strong></span><span><strong>' + money(sm.balanceDue) + '</strong></span></div>';
+  }
+
   // ---------------- save / print
   function hasContent(d) {
     return d.lines.length || d.customer.name || d.customer.phone || d.customer.email || d.notes;
@@ -612,16 +680,85 @@
       p(date.getHours()) + p(date.getMinutes()) + p(date.getSeconds());
   }
 
-  function printTicket() {
+  // The invoice and the club tags share one ticket number, assigned the first
+  // time either is printed and kept until the ticket is cleared.
+  function ticketMeta() {
     var d = S.draft;
-    if (!d.lines.length) { toast('Add at least one item first'); return; }
-    var now = new Date();
-    var t = { number: ticketNumber(now), createdAt: now.toISOString(), customer: d.customer, notes: d.notes };
-    document.getElementById('print-area').innerHTML = invoiceHTML(t, compute(), S.settings.footer);
-    var img = document.querySelector('#print-area img');
+    if (!d.number) {
+      var now = new Date();
+      d.number = ticketNumber(now);
+      d.createdAt = now.toISOString();
+    }
+    return {
+      number: d.number, createdAt: d.createdAt, customer: d.customer, notes: d.notes,
+      readyBy: d.readyBy, readyTime: d.readyTime, payment: d.payment
+    };
+  }
+
+  // pageCss: an @page rule for this print job (label printers need their own paper size).
+  function printHTML(html, pageCss) {
+    var styleEl = document.getElementById('print-page');
+    if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'print-page'; document.head.appendChild(styleEl); }
+    styleEl.textContent = pageCss || '';
+    document.getElementById('print-area').innerHTML = html;
+    var imgs = Array.prototype.slice.call(document.querySelectorAll('#print-area img'));
+    var pending = imgs.filter(function (i) { return !i.complete; });
     var done = false;
     function go() { if (done) return; done = true; window.print(); }
-    if (img && !img.complete) { img.onload = go; img.onerror = go; setTimeout(go, 800); } else go();
+    if (!pending.length) return go();
+    var left = pending.length;
+    pending.forEach(function (i) { i.onload = i.onerror = function () { if (--left === 0) go(); }; });
+    setTimeout(go, 1000);
+  }
+
+  function printTicket() {
+    if (!S.draft.lines.length) { toast('Add at least one item first'); return; }
+    printHTML(invoiceHTML(ticketMeta(), compute(), S.settings.footer), '');
+  }
+
+  // ---------------- order tag (one per ticket)
+  function printTag() {
+    if (!S.draft.lines.length) { toast('Add at least one item first'); return; }
+    var t = ticketMeta();
+    var c = compute();
+    var sm = X.paymentSummary(t.payment, c.total);
+    var clubs = X.clubCount(S.draft.lines);
+    var html = '<div class="tag">' +
+      '<div class="tag-top"><img src="logo.png" alt=""><span class="tag-num">#' + esc(t.number) + '</span></div>' +
+      '<div class="tag-name">' + esc(t.customer.name || 'No name') + '</div>' +
+      (t.customer.phone ? '<div class="tag-phone">' + esc(t.customer.phone) + '</div>' : '') +
+      '<div class="tag-club">' + clubs + ' club' + (clubs === 1 ? '' : 's') + '</div>' +
+      '<div class="tag-work">' + esc(X.tagWorkSummary(c.rows)) + '</div>' +
+      '<div class="tag-foot"><span>' + (t.readyBy ? 'Ready ' + esc(X.formatReadyBy(t.readyBy, t.readyTime)) : '') + '</span>' +
+        '<span>' + (sm.balanceDue === 0 ? 'PAID' : 'Due ' + money(sm.balanceDue)) + '</span></div>' +
+    '</div>';
+
+    if (S.settings.tagFormat === 'label') {
+      var w = Number(S.settings.labelWidth) || 2.25, h = Number(S.settings.labelHeight) || 1.25;
+      printHTML('<div class="tags-label" style="--tw:' + w + 'in;--th:' + h + 'in">' + html + '</div>',
+        '@media print { @page { size: ' + w + 'in ' + h + 'in; margin: 0; } }');
+    } else {
+      printHTML('<div class="tags-sheet">' + html + '</div>', '');
+    }
+  }
+
+  function invoicePaymentHTML(payment, totalCents) {
+    var sm = X.paymentSummary(payment, totalCents);
+    var h = '';
+    if (sm.status === 'paid') {
+      h += '<div><span>' + esc(sm.label) + '</span><span>' + money(sm.paid) + '</span></div>';
+      if (sm.tendered) {
+        h += '<div class="muted"><span>Cash received</span><span>' + money(sm.tendered) + '</span></div>' +
+          '<div class="muted"><span>Change</span><span>' + money(sm.changeDue) + '</span></div>';
+      }
+      h += '<div class="pay-stamp paid">PAID</div>';
+    } else if (sm.status === 'deposit' && sm.paid) {
+      h += '<div><span>' + esc(sm.label) + '</span><span>−' + money(sm.paid) + '</span></div>' +
+        '<div class="balance"><span>Balance due at pickup</span><span>' + money(sm.balanceDue) + '</span></div>';
+    } else {
+      h += '<div class="balance"><span>Balance due at pickup</span><span>' + money(sm.balanceDue) + '</span></div>';
+    }
+    return h;
   }
 
   function invoiceHTML(t, c, footer) {
@@ -646,7 +783,8 @@
       '<div class="inv-head">' +
         '<div class="bill-to"><div class="lbl">Invoice for</div><div class="nm">' + esc(cust.name || '—') + '</div>' +
           (cust.phone ? '<div>' + esc(cust.phone) + '</div>' : '') + (cust.email ? '<div>' + esc(cust.email) + '</div>' : '') + '</div>' +
-        '<div><h1>INVOICE</h1><dl class="kv"><dt>Invoice #</dt><dd>' + esc(t.number || '—') + '</dd><dt>Date</dt><dd>' + esc(fmtDate(t.createdAt || new Date().toISOString())) + '</dd></dl></div>' +
+        '<div><h1>INVOICE</h1><dl class="kv"><dt>Invoice #</dt><dd>' + esc(t.number || '—') + '</dd><dt>Date</dt><dd>' + esc(fmtDate(t.createdAt || new Date().toISOString())) + '</dd>' +
+          (t.readyBy ? '<dt>Ready by</dt><dd>' + esc(X.formatReadyBy(t.readyBy, t.readyTime)) + '</dd>' : '') + '</dl></div>' +
       '</div>' +
       '<table><thead><tr><th>Description</th><th>Type</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="bottom">' +
@@ -657,6 +795,7 @@
           '<div><span>Subtotal</span><span>' + money(c.subtotal) + '</span></div>' +
           '<div><span>NV sales tax ' + c.taxRate + '% <span class="muted">on ' + money(c.taxableSubtotal) + '</span></span><span>' + money(c.tax) + '</span></div>' +
           '<div class="grand"><span>Total</span><span>' + money(c.total) + '</span></div>' +
+          invoicePaymentHTML(t.payment, c.total) +
         '</div>' +
       '</div>' +
       '<div class="sig"><div>Customer signature</div><div style="flex:.5">Date</div></div>' +
@@ -844,6 +983,17 @@
       '<div class="group-title">Sales tax</div><div class="group">' +
         '<div class="row"><label>Tax rate (%)</label><input type="number" step="0.001" min="0" max="25" data-bind="settings:taxRate" data-type="number" value="' + esc(s.taxRate) + '"' + dis + '></div>' +
       '</div><div class="group-foot">Clark County, NV combined rate is 8.375% (4.6% state + 3.775% local). Tax is applied only to items marked Taxable (parts); separately stated repair and installation labor is not taxable in Nevada.</div>' +
+      '<div class="group-title">Order tag</div><div class="group">' +
+        '<div class="row"><label>Print on</label><select data-bind="settings:tagFormat" data-rerender="1"' + dis + '>' +
+          '<option value="sheet"' + (s.tagFormat !== 'label' ? ' selected' : '') + '>Regular paper (cut out)</option>' +
+          '<option value="label"' + (s.tagFormat === 'label' ? ' selected' : '') + '>Label printer</option></select></div>' +
+        (s.tagFormat === 'label'
+          ? '<div class="row"><label>Label width (in)</label><input type="number" step="0.01" min="0.5" max="8" data-bind="settings:labelWidth" data-type="number" value="' + esc(s.labelWidth) + '"' + dis + '></div>' +
+            '<div class="row"><label>Label height (in)</label><input type="number" step="0.01" min="0.5" max="8" data-bind="settings:labelHeight" data-type="number" value="' + esc(s.labelHeight) + '"' + dis + '></div>'
+          : '') +
+      '</div><div class="group-foot">' + (s.tagFormat === 'label'
+        ? 'Use the size printed on the label roll (e.g. 2.25 × 1.25 in for DYMO 30334, 2.4 × 1.1 in for Brother DK-1209). In the print window, pick the label printer.'
+        : 'Prints one tag in the top-left corner of the page; cut it out along the dashed line.') + '</div>' +
       '<div class="group-title">Printed invoice</div><div class="group">' +
         '<div class="row"><label>Footer message</label><input data-bind="settings:footer" value="' + esc(s.footer) + '"' + dis + '></div>' +
       '</div>' +
@@ -916,12 +1066,16 @@
     var target = spec[0], path = spec[1];
     var v = el.type === 'checkbox' ? el.checked : el.value;
     if (el.dataset.type === 'number') v = num(v);
-    if (target === 'draft') { setPath(S.draft, path, v); }
+    if (target === 'draft') {
+      setPath(S.draft, path, v);
+      if (path.indexOf('payment.') === 0) renderLines();
+    }
     else if (target === 'edit' && sheet) {
       setPath(sheet.edit, path, v);
       if (el.dataset.rerender) refreshSheet();
     } else if (target === 'settings' && settingsEdit) {
       setPath(settingsEdit, path, v);
+      if (el.dataset.rerender) renderSettings();
     }
   }
 
@@ -982,6 +1136,10 @@
       S.draft = newDraft(); renderTicketView();
     },
     'print-ticket': function () { printTicket(); },
+    'print-tags': function () { printTag(); },
+    'pay-status': function (el) { S.draft.payment.status = el.dataset.v; renderPayment(); renderLines(); },
+    'pay-method': function (el) { S.draft.payment.method = el.dataset.v; renderPayment(); renderLines(); },
+    'ready-quick': function (el) { S.draft.readyBy = el.dataset.v; if (!el.dataset.v) S.draft.readyTime = ''; renderPayment(); renderLines(); },
 
     'catalog-cat': function (el) { S.catalogCat = el.dataset.id; renderCatalog(); },
     'add-category': function () { requireUnlock(function () { openCategoryEditor(null); }); },
@@ -1098,9 +1256,9 @@
   // Keep the printed invoice light and complete even if printed with Ctrl+P.
   window.addEventListener('beforeprint', function () {
     if (!document.getElementById('print-area').innerHTML && S.draft.lines.length) {
-      var now = new Date();
-      var t = { number: ticketNumber(now), createdAt: now.toISOString(), customer: S.draft.customer, notes: S.draft.notes };
-      document.getElementById('print-area').innerHTML = invoiceHTML(t, compute(), S.settings.footer);
+      var ps = document.getElementById('print-page');
+      if (ps) ps.textContent = '';
+      document.getElementById('print-area').innerHTML = invoiceHTML(ticketMeta(), compute(), S.settings.footer);
     }
   });
 

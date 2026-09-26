@@ -374,3 +374,48 @@ textarea.notes {
 .overlay-title { font-weight: 600; font-size: 17px; margin: 14px 0 4px; }
 .spinner { width: 28px; height: 28px; margin: 0 auto; border-radius: 50%; border: 3px solid var(--fill-2); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Pickup & payment ---------- */
+.seg-full { display: flex; width: 100%; }
+.seg-full button { flex: 1; padding: 7px 8px; }
+.row.quick { gap: 2px; flex-wrap: wrap; min-height: 38px; }
+.row.quick .btn { padding: 4px 8px; font-size: 13px; }
+.row.pay-calc { min-height: 36px; color: var(--label-2); }
+.row.pay-calc strong { color: var(--label); }
+.warn { color: var(--red); font-weight: 600; }
+.inline-inputs input[type=date], .inline-inputs input[type=time] { font-size: 14px; }
+
+/* ---------- Invoice payment ---------- */
+.invoice .sum .balance { border-top: 1px solid #ddd; margin-top: 4px; padding-top: 5px; font-weight: 700; }
+.invoice .pay-stamp { justify-content: center !important; margin-top: 8px; border: 2px solid #1f8a3b; color: #1f8a3b; border-radius: 6px; font-weight: 800; letter-spacing: .2em; font-size: 15px; padding: 3px 0 !important; }
+
+/* ---------- Order tag ---------- */
+.tag { box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; font-family: var(--font); color: #000; break-inside: avoid; }
+.tag-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.tag-num { font-family: var(--mono); font-weight: 700; }
+.tag-name { font-weight: 800; line-height: 1.1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tag-club { font-weight: 700; color: #c25e00; }
+.tag-work { color: #333; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
+.tag-foot { margin-top: auto; display: flex; justify-content: space-between; gap: 6px; font-weight: 700; }
+
+/* Regular paper: one 3.75 x 2 in tag, cut out along the dashed border */
+.tags-sheet .tag { width: 3.75in; height: 2in; border: 1px dashed #888; padding: .14in .18in; gap: 2px; }
+.tags-sheet .tag-top img { height: .32in; }
+.tags-sheet .tag-num { font-size: 12pt; }
+.tags-sheet .tag-name { font-size: 16pt; margin-top: 4px; }
+.tags-sheet .tag-phone { font-size: 11pt; }
+.tags-sheet .tag-club { font-size: 11pt; }
+.tags-sheet .tag-work { font-size: 9pt; -webkit-line-clamp: 2; }
+.tags-sheet .tag-foot { font-size: 10pt; }
+
+/* Label printer: the tag fills the label */
+.tags-label .tag { width: var(--tw); height: var(--th); padding: .05in .08in; gap: 0; }
+.tags-label .tag-top img { display: none; }
+.tags-label .tag-num { font-size: 8pt; }
+.tags-label .tag-name { font-size: 11pt; }
+.tags-label .tag-phone, .tags-label .tag-club { font-size: 8pt; }
+.tags-label .tag-work { font-size: 6.5pt; -webkit-line-clamp: 1; }
+.tags-label .tag-foot { font-size: 7pt; }
+.ticket .row input.field { flex: 1; background: var(--bg-elevated); border-radius: 8px; padding: 5px 8px; text-align: left !important; font-size: 14px; }
+@media (prefers-color-scheme: dark) { .ticket .row input.field { background: #3a3a3c; } }
+.row.quick { gap: 0; }

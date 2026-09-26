@@ -88,8 +88,17 @@ iPad/iPhone use Share → *Add to Home Screen*.
    Installation*; a shaft adds *Shaft Installation* (and offers *Save Grip*). Use −/+ to
    change quantity. Tap a line to pick a size, override a price, make it free, or add a
    note. Tap **Remove/Add** beside a linked labor line to switch it off or on.
-2. **Print** prints the invoice with a ticket number based on date and time
-   (e.g. `260926-143205`). Then press **Clear** for the next customer.
+2. **Pickup:** set the **Ready** date/time (or tap Today / Tomorrow / 3 days / 1 week).
+3. **Payment:** choose *Due at pickup*, *Paid* (Card / Cash / Other; for cash, enter the
+   amount received to see the change) or *Deposit* (enter the amount; the balance due is
+   shown and printed).
+4. **Invoice** prints the invoice with ready-by date, payment and balance due.
+   **Tag** prints one tag for the order to attach to the customer's clubs: name, phone,
+   ticket #, number of clubs, work, ready-by and PAID / amount due. Both use the same
+   ticket number (e.g. `260926-143205`). Then press **Clear** for the next customer.
+
+The tag prints on regular paper (cut out the 3.75 × 2 in tag) or on a label printer:
+**Settings → Order tag**, with the label size.
 
 ## Pricing rules
 
