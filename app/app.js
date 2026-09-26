@@ -642,7 +642,7 @@
     }).join('');
     var cust = t.customer || {};
     return '<div class="invoice">' +
-      '<img class="logo" src="logo.jpg" alt="RoboGolfPro Las Vegas — 8790 S Maryland Pkwy, Las Vegas, NV 89123 — 702-715-9651">' +
+      '<img class="logo" src="logo.png" alt="RoboGolfPro Las Vegas — 8790 S Maryland Pkwy, Las Vegas, NV 89123 — 702-715-9651">' +
       '<div class="inv-head">' +
         '<div class="bill-to"><div class="lbl">Invoice for</div><div class="nm">' + esc(cust.name || '—') + '</div>' +
           (cust.phone ? '<div>' + esc(cust.phone) + '</div>' : '') + (cust.email ? '<div>' + esc(cust.email) + '</div>' : '') + '</div>' +

@@ -73,8 +73,10 @@ button { cursor: pointer; }
   padding: 18px 12px;
   display: flex; flex-direction: column; gap: 18px;
 }
-.brand { background: #f2f2f2; border-radius: 14px; padding: 10px; }
-.brand img { display: block; width: 100%; height: auto; border-radius: 6px; }
+.brand { padding: 4px 6px; border-radius: 14px; }
+.brand img { display: block; width: 100%; height: auto; }
+/* The logo has black lettering, so give it a light card in dark mode. */
+@media (prefers-color-scheme: dark) { .brand { background: #fff; padding: 10px; } }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav button {
   display: flex; align-items: center; gap: 10px;
@@ -130,11 +132,11 @@ main { overflow: hidden; min-width: 0; }
 }
 .segmented button.active { background: var(--bg-elevated); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04); font-weight: 600; }
 
-.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
-.chips::-webkit-scrollbar { display: none; }
+/* Category buttons wrap onto extra lines when the window is narrow. */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 0 12px; }
 .chip {
   border: 0; background: var(--card); color: var(--label); border-radius: 999px;
-  padding: 7px 14px; font-size: 14px; font-weight: 500; white-space: nowrap; box-shadow: var(--shadow);
+  padding: 7px 14px; font-size: 14px; font-weight: 500; box-shadow: var(--shadow);
 }
 .chip.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 
