@@ -48,9 +48,9 @@ number and a *Check for Updates* button are in **Settings**.
 
 **Publishing an update:**
 1. Push your changes. (Every push also builds a test .exe under the Actions tab.)
-2. Create a release tag with a higher version number, for example:
-   `git tag v1.4.0 && git push origin v1.4.0`
-   (or on GitHub: *Releases → Draft a new release → choose a new tag `v1.4.0` → Publish*.)
+2. On GitHub: **Releases → Draft a new release → Choose a tag**, type a new, higher
+   version such as `v1.4.0`, then *Create new tag*. Set **Target** to the branch with your
+   changes and click **Publish release**.
 3. GitHub Actions builds `RoboGolfPOS.exe` for that version, tests it and attaches it to the
    release, which takes about 2 minutes. Shop PCs pick it up the next time they check.
 
