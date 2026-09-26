@@ -1,0 +1,51 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main, claude/golf-pos-system-t3tjww]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:exe
+
+      - name: Smoke test the .exe
+        shell: pwsh
+        run: |
+          $env:ROBOGOLF_NO_BROWSER = "1"
+          $env:ROBOGOLF_DATA_DIR = "$env:RUNNER_TEMP\robogolf-data"
+          $p = Start-Process -FilePath dist\RoboGolfPOS.exe -PassThru -NoNewWindow
+          Start-Sleep -Seconds 5
+          $api = Invoke-RestMethod http://127.0.0.1:47817/api/catalog
+          if (-not $api.configured -or $api.storage -ne 'local') { throw "API check failed" }
+          $page = Invoke-WebRequest http://127.0.0.1:47817/ -UseBasicParsing
+          if ($page.Content -notmatch 'RoboGolfPro Repair POS') { throw "Page check failed" }
+          Stop-Process -Id $p.Id
+          Write-Host "Smoke test passed"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoboGolfPOS-windows
+          path: dist/RoboGolfPOS.exe
+          if-no-files-found: error
+
+      - name: Attach to release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/RoboGolfPOS.exe

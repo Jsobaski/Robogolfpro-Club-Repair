@@ -46,6 +46,9 @@
   // ---------------------------------------------------------------- server sync
   var Remote = {
     mode: 'loading',   // loading | online | unconfigured | offline
+    storage: 'cloud',  // cloud (Vercel + Upstash) | local (desktop app, file on this PC)
+    pinStatus: 'set',  // set | setup (desktop: no PIN chosen yet) | missing
+    location: null,    // desktop: folder the catalog is saved in
     version: 0,
     updatedAt: null,
     pin: null,         // admin PIN, kept in memory for this page only
@@ -78,6 +81,9 @@
       if (!r.configured) { Remote.mode = 'unconfigured'; Remote.error = r.error; }
       else {
         Remote.mode = 'online';
+        Remote.storage = r.storage || 'cloud';
+        Remote.pinStatus = r.pin || 'set';
+        Remote.location = r.location || null;
         if (r.data) apply(r.data);
         else { Remote.version = 0; }
       }
@@ -136,16 +142,19 @@
       return;
     }
     if (Remote.pin) { fn(); return; }
+    var creating = Remote.pinStatus === 'setup';
     openSheet({
-      title: 'Unlock Editing',
-      done: 'Unlock',
+      title: creating ? 'Create Admin PIN' : 'Unlock Editing',
+      done: creating ? 'Create' : 'Unlock',
       edit: { pin: '' },
       onDone: function (e) {
         var pin = String(e.pin || '');
         if (!pin) return false;
+        if (creating && pin !== String(e.confirm || '')) { toast('The two PINs don’t match'); return false; }
         api('POST', '/api/verify-pin', { pin: pin }).then(function (r) {
           if (r.status === 200) {
             Remote.pin = pin;
+            if (r.created) { Remote.pinStatus = 'set'; toast('Admin PIN created'); }
             closeSheet();
             render();
             fn();
@@ -156,6 +165,13 @@
         return false; // keep the sheet open until the server answers
       },
       renderBody: function (e) {
+        if (creating) {
+          return '<div class="group-title">Choose an admin PIN</div><div class="group">' +
+            '<div class="row"><label>New PIN</label><input type="password" autocomplete="new-password" autofocus data-bind="edit:pin" value="' + esc(e.pin) + '"></div>' +
+            '<div class="row"><label>Confirm</label><input type="password" autocomplete="new-password" data-bind="edit:confirm" value="' + esc(e.confirm || '') + '"></div>' +
+            '</div><div class="group-foot">At least 4 characters. It will be needed to change the catalog or settings; staff can ring up tickets without it. ' +
+            'To reset a forgotten PIN, delete <b>admin-pin.json</b> from the data folder.</div>';
+        }
         return '<div class="group-title">Admin PIN</div><div class="group">' +
           '<div class="row"><label>PIN</label><input type="password" autocomplete="off" autofocus data-bind="edit:pin" value="' + esc(e.pin) + '"></div>' +
           '</div><div class="group-foot">Needed to change the catalog or settings. Staff can ring up tickets without it.</div>';
@@ -220,7 +236,7 @@
   function renderMeta() {
     var status;
     if (Remote.saving) status = '<span class="dot busy"></span>Saving…';
-    else if (Remote.mode === 'online') status = '<span class="dot ok"></span>Catalog synced' + (Remote.updatedAt ? '<br>Updated ' + esc(fmtDateTime(Remote.updatedAt)) : '');
+    else if (Remote.mode === 'online') status = '<span class="dot ok"></span>' + (Remote.storage === 'local' ? 'Saved on this computer' : 'Catalog synced') + (Remote.updatedAt ? '<br>Updated ' + esc(fmtDateTime(Remote.updatedAt)) : '');
     else if (Remote.mode === 'loading') status = '<span class="dot busy"></span>Loading catalog…';
     else if (Remote.mode === 'unconfigured') status = '<span class="dot bad"></span>Storage not connected — using built-in prices';
     else status = '<span class="dot bad"></span>Offline — using built-in prices';
@@ -236,6 +252,10 @@
         : 'Can’t reach the server, so ' + what + ' can’t be edited right now. Showing the built-in defaults.') + '</div>';
     }
     if (Remote.pin) return '';
+    if (Remote.pinStatus === 'setup') {
+      return '<div class="notice"><span>Create an admin PIN to start editing. After that, ' + what + ' require the PIN.</span>' +
+        '<button class="btn primary" data-action="unlock">Create PIN</button></div>';
+    }
     return '<div class="notice"><span>' + what.charAt(0).toUpperCase() + what.slice(1) + ' are locked. Changes require the admin PIN.</span>' +
       '<button class="btn primary" data-action="unlock">Unlock</button></div>';
   }
@@ -584,7 +604,7 @@
     var items = cat ? itemsIn(cat.id, true) : [];
     var el = document.getElementById('view-catalog');
     el.innerHTML =
-      '<div class="title-row"><div><div class="large-title">Catalog</div><p class="subtitle" style="margin:0">Add grips, sizes, shafts and labor. Saved online and shared by every device.</p></div>' +
+      '<div class="title-row"><div><div class="large-title">Catalog</div><p class="subtitle" style="margin:0">Add grips, sizes, shafts and labor. ' + (Remote.storage === 'local' ? 'Saved on this computer.' : 'Saved online and shared by every device.') + '</p></div>' +
       '<div class="actions"><button class="btn" data-action="export-catalog">Export</button><button class="btn" data-action="import-catalog">Import</button><button class="btn danger" data-action="reset-catalog">Reset to Defaults</button></div></div>' +
       lockBar('catalog changes') +
       '<div class="split">' +
@@ -751,7 +771,7 @@
     var locked = !Remote.pin || !canEdit();
     var dis = locked ? ' disabled' : '';
     document.getElementById('view-settings').innerHTML =
-      '<div class="large-title">Settings</div><p class="subtitle">Saved online with the catalog and shared by every device. Tickets are never stored.</p>' +
+      '<div class="large-title">Settings</div><p class="subtitle">' + (Remote.storage === 'local' ? 'Saved on this computer with the catalog.' : 'Saved online with the catalog and shared by every device.') + ' Tickets are never stored.</p>' +
       '<div style="max-width:640px">' + lockBar('settings') +
       '<div class="group-title">Sales tax</div><div class="group">' +
         '<div class="row"><label>Tax rate (%)</label><input type="number" step="0.001" min="0" max="25" data-bind="settings:taxRate" data-type="number" value="' + esc(s.taxRate) + '"' + dis + '></div>' +
@@ -763,7 +783,9 @@
       '<div class="group-title">Backup</div><div class="group">' +
         '<div class="row tap" data-action="export-all"><span class="grow">Download backup</span><span class="end small">Catalog & settings' + ICON.chev + '</span></div>' +
         '<div class="row tap" data-action="import-all"><span class="grow">Restore from backup…</span>' + ICON.chev + '</div>' +
-      '</div><div class="group-foot">The catalog is stored online. A downloaded backup lets you restore it if something is deleted by mistake.</div>' +
+      '</div><div class="group-foot">' + (Remote.storage === 'local' && Remote.location
+        ? 'The catalog is saved in <b>' + esc(Remote.location) + '</b> (catalog.json, plus catalog.json.bak with the previous version). Copy that folder to a USB drive or cloud folder to back it up.'
+        : 'The catalog is stored online. A downloaded backup lets you restore it if something is deleted by mistake.') + '</div>' +
       '</div>';
   }
 

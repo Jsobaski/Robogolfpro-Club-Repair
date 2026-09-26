@@ -3,3 +3,6 @@ node_modules/
 Thumbs.db
 .local-store.json
 .vercel
+build/
+dist/
+.desktop-data/

@@ -1,10 +1,17 @@
 {
   "name": "robogolfpro-club-repair",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Club repair POS for RoboGolfPro Las Vegas",
   "scripts": {
     "dev": "node scripts/dev-server.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "desktop": "node desktop/main.js",
+    "build:exe": "node scripts/build-exe.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "1.0.0-alpha.6",
+    "rcedit": "^5.0.2"
   }
 }

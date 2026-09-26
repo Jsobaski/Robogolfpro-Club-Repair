@@ -5,36 +5,68 @@ A point-of-sale screen for club repair tickets at RoboGolfPro Las Vegas. It repl
 labor is added automatically, Nevada sales tax is calculated, and the ticket prints as an
 invoice with the RoboGolfPro logo at the top.
 
-## How it works
+## Two ways to run it
 
-- The app is a website hosted on **Vercel**. Open it from any computer, tablet or phone.
-- The **catalog and settings are saved online** (in a free Upstash Redis database connected
-  through Vercel), so every device sees the same items and prices. Nothing depends on a
-  particular browser, and clearing browser history doesn't affect it.
-- **Tickets aren't saved.** Ring up, print, then press **Clear**. Reloading the page drops
-  the current ticket; the browser warns you before that happens.
+| | **Windows app (.exe)** | **Website (Vercel)** |
+|---|---|---|
+| Where the catalog is saved | A folder on that PC | Online database (Upstash) |
+| Cost | Free | Free (Upstash free plan) |
+| Needs internet | No | Yes |
+| Multiple devices share the catalog | No, one PC | Yes |
+
+Both run the same app. Tickets are never saved in either one: ring up, print, press **Clear**.
+
+## Windows app (.exe)
+
+**Getting the .exe:** GitHub builds it automatically on every push.
+1. Open the repository on GitHub → **Actions** tab → **Build Windows app**.
+2. Click the newest run with a green check, then scroll to **Artifacts** and download
+   **RoboGolfPOS-windows**. Unzip it to get `RoboGolfPOS.exe`.
+   (For a permanent download link, push a tag like `v1.2.0`. The .exe is then attached to a
+   GitHub Release.)
+
+**Installing on the shop PC:**
+1. Make a folder such as `Documents\RoboGolf POS` and put `RoboGolfPOS.exe` in it.
+2. Double-click it. Windows will warn about an unrecognized app because the file isn't
+   code-signed: click **More info → Run anyway** (only needed the first time).
+3. A small black window opens (this is the app's engine; minimize it, don't close it), then
+   the POS opens in its own Edge window.
+4. Right-click the .exe → **Send to → Desktop (create shortcut)**. Optionally copy that
+   shortcut into the Startup folder (`Win+R`, type `shell:startup`) so it starts with the PC.
+
+**Where changes are saved:** a **`RoboGolf POS Data`** folder next to the .exe:
+- `catalog.json` holds the catalog and settings. `catalog.json.bak` is the version before
+  the last save.
+- `admin-pin.json` holds the admin PIN (hashed, not readable). The first time someone
+  clicks **Unlock** in Catalog or Settings, they choose the PIN. **Forgot the PIN?** Delete
+  this file and choose a new one.
+- **Back up** by copying the folder to a USB drive or OneDrive. **Move to a new PC** by
+  copying the .exe and the folder together.
+
+The app only listens on the PC itself (`127.0.0.1`); other computers on the network can't
+reach it. To quit, close the black window.
+
+## Website on Vercel (optional)
+
+- The **catalog and settings are saved online**, so every device sees the same items and
+  prices.
 - Anyone with the link can ring up tickets. **Changing the catalog or settings requires the
   admin PIN.**
 
-## Deploying to Vercel (one time, about 10 minutes)
+### Deploying to Vercel
 
 1. **Import the repo:** in Vercel choose *Add New → Project*, pick this GitHub repository and
    click **Deploy**. No build settings are needed; `vercel.json` handles them.
-2. **Add the database:** open the project → **Storage** tab → *Create Database* → choose
-   **Upstash for Redis** (free plan) → connect it to the project. Vercel adds the
-   `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables automatically.
-3. **Set the admin PIN:** project → **Settings → Environment Variables** → add
-   `ADMIN_PIN` with a code of at least 6 characters (Production and Preview).
-4. **Redeploy** (Deployments → ⋯ → Redeploy) so the new variables take effect.
-5. Open the site. The bottom of the sidebar should read **"Catalog synced"**. Until the first
-   catalog save, the app uses the built-in price list from the spreadsheet.
+2. **Create a free database** at **console.upstash.com** (no credit card): *Redis → Create
+   Database → Free plan*. On its page, copy **UPSTASH_REDIS_REST_URL** and
+   **UPSTASH_REDIS_REST_TOKEN** from the *REST API* section. (Don't use the Upstash
+   integration inside Vercel; it only offers paid plans.)
+3. In Vercel, go to **Settings → Environment Variables** and add `UPSTASH_REDIS_REST_URL`,
+   `UPSTASH_REDIS_REST_TOKEN`, and `ADMIN_PIN` (6+ characters).
+4. **Redeploy** (Deployments → ⋯ → Redeploy). The sidebar should read **"Catalog synced"**.
 
-**Install it like an app:** in Chrome or Edge, open the site and choose *Install* from the
-address bar or the ⋯ menu. On iPad/iPhone, use Share → *Add to Home Screen*. You get its own
-window and a desktop/home-screen icon.
-
-If the sidebar says **"Storage not connected"**, step 2 or step 4 was missed. If saving says
-**"ADMIN_PIN is not set"**, do step 3 and redeploy.
+**Install it like an app:** in Chrome or Edge choose *Install* from the ⋯ menu; on
+iPad/iPhone use Share → *Add to Home Screen*.
 
 ## Using it
 
@@ -57,8 +89,9 @@ If the sidebar says **"Storage not connected"**, step 2 or step 4 was missed. If
 
 ## Adding products and labor (no coding)
 
-Open **Catalog** and click **Unlock** (admin PIN). Editing stays unlocked until the page is
-reloaded or you click *Lock editing* in the sidebar.
+Open **Catalog** and click **Unlock** (admin PIN; in the Windows app the first person to
+unlock creates it). Editing stays unlocked until the page is reloaded or you click
+*Lock editing* in the sidebar.
 
 - **Add Category:** e.g. "Grip Tape". Choose *Product* (parts) or *Labor*.
 - **Add Item:** name, price, taxable, and optionally:
@@ -68,27 +101,27 @@ reloaded or you click *Lock editing* in the sidebar.
   - **Linked items:** items added automatically at the same quantity (e.g. a new grip
     links to *Golf Grip Installation*). Turn *Auto* off to offer it as a one-tap option.
   - **Show in POS:** hide discontinued items without deleting them.
-- Changes save immediately and show on other devices the next time they're opened or
-  focused. If two people edit at the same moment, the second save is refused and that
-  person is asked to redo the change on the latest catalog, so nothing is silently
-  overwritten.
+- Changes save immediately. On the website they show on other devices the next time
+  those devices are opened or focused. If two people edit at the same moment, the second
+  save is refused and that person is asked to redo the change on the latest catalog, so
+  nothing is silently overwritten.
 - **Settings → Download backup** saves a copy of the catalog and settings. Keep one after
   big changes; **Restore from backup** puts it back.
 
 ## For developers
 
 ```
-app/                      static site (Vercel output directory)
-  index.html, styles.css  shell and Apple-style design
-  app.js                  UI (vanilla JS, no build step)
-  pricing.js              pricing/tax engine (pure functions)
-  catalog-defaults.js     starting catalog from the spreadsheet
+app/                      static site (UI, pricing engine, default catalog)
 api/catalog.js            GET catalog / PUT catalog (x-admin-pin, version check)
-api/verify-pin.js         POST { pin }
-lib/                      storage (Upstash REST or local file), validation, helpers
-scripts/dev-server.js     local stand-in for Vercel
-tests/                    `npm test` (Node 18+)
+api/verify-pin.js         POST { pin } (desktop: first PIN creates it)
+lib/store.js              storage: Upstash REST (cloud) or JSON file (desktop/dev)
+lib/local-server.js       HTTP server used by the desktop app and dev server
+desktop/main.js           desktop entry: data folder, server on 127.0.0.1:47817, app window
+scripts/build-exe.js      packages desktop/main.js + app/ into one executable (Node SEA)
+.github/workflows/        builds and smoke-tests RoboGolfPOS.exe on Windows
+tests/                    `npm test`
 ```
 
-Run locally: `ADMIN_PIN=1234 npm run dev`, then open http://localhost:3000. The catalog is
-stored in `.local-store.json`.
+- `npm run dev`: website mode locally (http://localhost:3000, PIN `1234`).
+- `npm run desktop`: desktop mode from source (data in `.desktop-data/`).
+- `npm run build:exe`: build an executable for the current OS into `dist/`.

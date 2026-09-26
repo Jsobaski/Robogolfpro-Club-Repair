@@ -33,7 +33,7 @@ const doc = (baseVersion, extra = {}) => ({ catalog: DEFAULT_CATALOG, settings: 
 test('empty store returns null data', async () => {
   const r = await call(catalogHandler);
   assert.equal(r.statusCode, 200);
-  assert.deepEqual(r.body, { configured: true, data: null });
+  assert.deepEqual(r.body, { configured: true, storage: 'local', pin: 'set', location: null, data: null });
   assert.equal(r.headers['cache-control'], 'no-store');
 });
 
@@ -68,4 +68,27 @@ test('rejects malformed catalogs', async () => {
 test('verify-pin', async () => {
   assert.equal((await call(pinHandler, { method: 'POST', body: { pin: '4821' } })).statusCode, 200);
   assert.equal((await call(pinHandler, { method: 'POST', body: { pin: '0000' } })).statusCode, 401);
+});
+
+test('desktop mode: first PIN entered becomes the admin PIN', async () => {
+  const saved = process.env.ADMIN_PIN;
+  delete process.env.ADMIN_PIN;
+  process.env.PIN_FILE = path.join(path.dirname(file), 'pin.json');
+  try {
+    assert.equal((await call(catalogHandler)).body.pin, 'setup');
+    assert.equal((await call(pinHandler, { method: 'POST', body: { pin: '12' } })).statusCode, 400);
+    const created = await call(pinHandler, { method: 'POST', body: { pin: 'golf99' } });
+    assert.equal(created.statusCode, 200);
+    assert.equal(created.body.created, true);
+    assert.equal(fs.readFileSync(process.env.PIN_FILE, 'utf8').includes('golf99'), false);
+    assert.equal((await call(catalogHandler)).body.pin, 'set');
+    assert.equal((await call(pinHandler, { method: 'POST', body: { pin: 'wrong' } })).statusCode, 401);
+    assert.equal((await call(pinHandler, { method: 'POST', body: { pin: 'golf99' } })).statusCode, 200);
+    const put = await call(catalogHandler, { method: 'PUT', headers: { 'x-admin-pin': 'golf99' }, body: doc(1) });
+    assert.equal(put.statusCode, 200);
+    assert.equal(fs.existsSync(file + '.bak'), true);
+  } finally {
+    process.env.ADMIN_PIN = saved;
+    delete process.env.PIN_FILE;
+  }
 });
