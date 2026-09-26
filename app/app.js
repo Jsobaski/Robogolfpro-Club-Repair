@@ -62,7 +62,7 @@
 
   function apply(data) {
     if (!data) return;
-    if (validCatalog(data.catalog)) S.catalog = data.catalog;
+    if (validCatalog(data.catalog)) S.catalog = window.migrateCatalog(data.catalog);
     S.settings = Object.assign(clone(window.DEFAULT_SETTINGS), data.settings || {});
     Remote.version = data.version || 0;
     Remote.updatedAt = data.updatedAt || null;
@@ -426,6 +426,7 @@
         var item = line.itemId ? itemById(line.itemId) : null;
         var sub = rowDetail(main);
         if (line.size) sub = esc(line.size) + ' · ' + sub;
+        if (main.options && main.options.length) sub = '<span class="opt-text">' + esc(main.options.join(' · ')) + '</span><br>' + sub;
         if (main.overridden) sub += ' · <span style="color:var(--accent-text)">price override</span>';
         if (line.note) sub += '<br>' + esc(line.note);
         var linkedHtml = '';
@@ -442,6 +443,10 @@
             '</div>';
           }).join('');
         }
+        linkedHtml += rows.filter(function (r) { return r.isOption; }).map(function (r) {
+          return '<div class="linked">' + ICON.link + '<span class="nm2">' + esc(r.name) + ' <span style="opacity:.8">(' + rowDetail(r) + ')</span></span>' +
+            '<span class="amt">' + money(r.total) + '</span></div>';
+        }).join('');
         return '<div class="line">' +
           '<div class="line-main">' +
             '<div class="info" data-action="edit-line" data-id="' + esc(line.uid) + '"><div class="nm">' + esc(main.name) + '</div><div class="sub">' + sub + '</div></div>' +
@@ -473,16 +478,79 @@
     if (S.view === 'ticket') renderLines();
   }
 
-  function addItem(item, size) {
+  function itemOptions(item) {
+    var cat = item ? catById(item.categoryId) : null;
+    return cat && Array.isArray(cat.options) ? cat.options : [];
+  }
+  function cleanOpts(opts) {
+    var out = {};
+    Object.keys(opts || {}).forEach(function (k) { var v = String(opts[k] || '').trim(); if (v) out[k] = v; });
+    return out;
+  }
+
+  function addItem(item, size, opts) {
+    opts = cleanOpts(opts);
+    var key = JSON.stringify(opts);
+    // Same item, size and options -> just bump the quantity.
     var existing = S.draft.lines.find(function (l) {
-      return l.itemId === item.id && (l.size || '') === (size || '') &&
+      return l.itemId === item.id && (l.size || '') === (size || '') && JSON.stringify(cleanOpts(l.opts)) === key &&
         (l.priceOverride === undefined || l.priceOverride === '' || l.priceOverride === null) && !l.note &&
         (!l.links || !Object.keys(l.links).length);
     });
     if (existing) existing.qty += 1;
-    else S.draft.lines.push({ uid: uid('l'), itemId: item.id, qty: 1, size: size || '', links: {} });
+    else S.draft.lines.push({ uid: uid('l'), itemId: item.id, qty: 1, size: size || '', opts: opts, links: {} });
     draftChanged();
-    toast('Added ' + item.name + (size ? ' (' + size + ')' : ''));
+    var extra = [size].concat(P.describeOptions(itemOptions(item), opts)).filter(Boolean).join(', ');
+    toast('Added ' + item.name + (extra ? ' (' + extra + ')' : ''));
+  }
+
+  // Controls for a category's options inside a sheet (edits sheet.edit.opts).
+  function optionControlsHTML(optDefs, chosen) {
+    return optDefs.map(function (o) {
+      var title = '<div class="group-title">' + esc(o.label || 'Option') + (o.required ? ' <span class="req">required</span>' : '') + '</div>';
+      if (o.type === 'text') {
+        return title + '<div class="group"><div class="row"><input data-bind="edit:opts.' + esc(o.id) + '" placeholder="' + esc(o.placeholder || '') +
+          '" value="' + esc(chosen[o.id] || '') + '" style="text-align:left"' + (o.required ? ' autofocus' : '') + '></div></div>';
+      }
+      var choices = (o.required ? [] : [{ name: '', label: 'None' }]).concat(o.choices || []);
+      var compact = choices.length > 5;
+      return title + '<div class="size-pills' + (compact ? ' compact' : '') + '" style="padding-top:0">' + choices.map(function (c) {
+        var v = c.name, cents = P.toCents(c.price);
+        return '<button class="' + ((chosen[o.id] || '') === v ? 'active' : '') + '" data-action="opt-pick" data-opt="' + esc(o.id) + '" data-v="' + esc(v) + '">' +
+          esc(c.label || c.name) + (cents ? '<small>+' + money(cents) + '</small>' : (compact ? '' : '<small>&nbsp;</small>')) + '</button>';
+      }).join('') + '</div>';
+    }).join('');
+  }
+
+  function needsChooser(item) {
+    return (item.sizes && item.sizes.length) || itemOptions(item).length;
+  }
+
+  // Size + options picker shown when an item needs choices before it's added.
+  function openAddSheet(item) {
+    var optDefs = itemOptions(item);
+    openSheet({
+      title: item.name,
+      done: 'Add',
+      edit: { size: '', opts: {} },
+      onDone: function (e) {
+        if (item.sizes && item.sizes.length && !e.size) { toast('Choose a size'); return false; }
+        var missing = P.missingOptions(optDefs, e.opts);
+        if (missing.length) { toast('Choose ' + missing.map(function (o) { return o.label; }).join(' and ')); return false; }
+        addItem(item, e.size, e.opts);
+      },
+      renderBody: function (e) {
+        var h = '';
+        if (item.sizes && item.sizes.length) {
+          h += '<div class="group-title">Size <span class="req">required</span></div><div class="size-pills" style="padding-top:0">' +
+            item.sizes.map(function (sz) {
+              return '<button class="' + (e.size === sz.name ? 'active' : '') + '" data-action="line-size" data-size="' + esc(sz.name) + '">' + esc(sz.name) +
+                '<small>' + money(P.basePriceCents(item, sz.name)) + '</small></button>';
+            }).join('') + '</div>';
+        }
+        return h + optionControlsHTML(optDefs, e.opts);
+      }
+    });
   }
 
   // ---------------- sheets
@@ -514,32 +582,23 @@
     sheet = null;
   }
 
-  function openSizeSheet(item) {
-    openSheet({
-      title: item.name,
-      edit: {},
-      renderBody: function () {
-        return '<div class="group-title">Choose size</div><div class="size-pills">' +
-          item.sizes.map(function (s) {
-            var p = s.price === '' || s.price === null || s.price === undefined ? item.price : s.price;
-            return '<button data-action="pick-size" data-id="' + esc(item.id) + '" data-size="' + esc(s.name) + '">' + esc(s.name) + '<small>' + money(P.toCents(p)) + '</small></button>';
-          }).join('') + '</div>';
-      }
-    });
-  }
-
   function openLineSheet(lineUid) {
     var line = S.draft.lines.find(function (l) { return l.uid === lineUid; });
     if (!line) return;
     var item = line.itemId ? itemById(line.itemId) : null;
     var edit = clone(line);
     edit.links = edit.links || {};
+    edit.opts = edit.opts || {};
+    var optDefs = itemOptions(item);
     if (item) (item.links || []).forEach(function (lk) { if (!(lk.itemId in edit.links)) edit.links[lk.itemId] = !!lk.auto; });
     openSheet({
       title: item ? item.name : (line.name || 'Custom Item'),
       done: 'Done',
       edit: edit,
       onDone: function (e) {
+        var missing = P.missingOptions(optDefs, e.opts);
+        if (missing.length) { toast('Choose ' + missing.map(function (o) { return o.label; }).join(' and ')); return false; }
+        e.opts = cleanOpts(e.opts);
         e.qty = Math.max(1, Math.floor(num(e.qty)) || 1);
         e.priceOverride = blankOrNum(e.priceOverride);
         if (!item) e.price = num(e.price);
@@ -566,6 +625,7 @@
                 '<small>' + money(P.basePriceCents(item, s.name)) + '</small></button>';
             }).join('') + '</div>';
         }
+        h += optionControlsHTML(optDefs, e.opts);
         if (item) {
           h += '<div class="group-title">Price</div><div class="group">' +
             '<div class="row"><label>Override</label><div class="inline-inputs" style="justify-content:flex-end">' +
@@ -582,7 +642,7 @@
               }).join('') + '</div>';
           }
         }
-        h += '<div class="group-title">Line note</div><div class="group"><div class="row"><input data-bind="edit:note" placeholder="e.g. Driver, +1/2 in, 2 extra wraps" value="' + esc(e.note) + '" style="text-align:left"></div></div>';
+        h += '<div class="group-title">Line note</div><div class="group"><div class="row"><input data-bind="edit:note" placeholder="e.g. Driver, +1/2 in" value="' + esc(e.note) + '" style="text-align:left"></div></div>';
         h += '<div style="margin-top:22px"><button class="btn danger lg" style="width:100%" data-action="remove-line" data-id="' + esc(line.uid) + '">Remove from Ticket</button></div>';
         return h;
       }
@@ -732,7 +792,8 @@
       (t.customer.phone ? '<div class="tag-phone">' + esc(t.customer.phone) + '</div>' : '') +
       '<div class="tag-club">' + clubs + ' club' + (clubs === 1 ? '' : 's') + '</div>' +
       '<ul class="tag-items">' + X.tagWorkLines(c.rows).map(function (w) {
-        return '<li><b>' + w.qty + '×</b> ' + esc(w.name) + (w.size ? ' <span class="tag-size">(' + esc(w.size) + ')</span>' : '') +
+        var extra = [w.size].concat(w.options).filter(Boolean).join(' · ');
+        return '<li><b>' + w.qty + '×</b> ' + esc(w.name) + (extra ? ' <span class="tag-size">(' + esc(extra) + ')</span>' : '') +
           (w.note ? '<div class="tag-line-note">' + esc(w.note) + '</div>' : '') + '</li>';
       }).join('') + '</ul>' +
       (t.notes && t.notes.trim() ? '<div class="tag-notes"><div class="tag-notes-lbl">Notes</div>' + esc(t.notes.trim()) + '</div>' : '') +
@@ -773,6 +834,7 @@
       var unit = r.parts.length === 1 ? money(r.parts[0].unit) : r.parts.map(function (p) { return money(p.unit); }).join(' / ');
       var det = [];
       if (r.size) det.push(esc(r.size));
+      (r.options || []).forEach(function (o) { det.push(esc(o)); });
       if (r.parts.length > 1) det.push(rowDetail(r));
       if (r.note) det.push(esc(r.note));
       return '<tr class="' + (r.isLinked ? 'linked-row' : '') + '">' +
@@ -848,7 +910,8 @@
                 '<span class="grow"><span' + (it.active === false ? ' class="muted"' : '') + '>' + esc(it.name) + '</span><br><span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-top:3px">' + badges.join('') + '</span></span>' +
                 '<span class="end"><span class="price">' + priceLabel(it).replace(/<[^>]+>/g, '') + '</span>' + ICON.chev + '</span></div>';
             }).join('') +
-            '<div class="row tap" data-action="add-item-catalog" style="color:var(--accent-text);font-weight:600">' + ICON.plus.replace('<svg', '<svg width="18" height="18"') + 'Add Item to ' + esc(cat.name) + '</div></div>'
+            '<div class="row tap" data-action="add-item-catalog" style="color:var(--accent-text);font-weight:600">' + ICON.plus.replace('<svg', '<svg width="18" height="18"') + 'Add Item to ' + esc(cat.name) + '</div></div>' +
+            ((cat.options || []).length ? '<div class="group-foot">When adding an item, asks for: ' + esc(cat.options.map(function (o) { return o.label + (o.required ? ' (required)' : ''); }).join(', ')) + '. Change this in Edit Category.</div>' : '')
           : '<div class="empty">Create a category to get started.</div>') +
         '</div>' +
       '</div>';
@@ -945,12 +1008,14 @@
     openSheet({
       title: existing ? 'Edit Category' : 'New Category',
       done: 'Save',
-      edit: existing ? clone(existing) : { id: null, name: '', type: 'product' },
+      edit: existing ? Object.assign({ options: [] }, clone(existing)) : { id: null, name: '', type: 'product', options: [] },
       onDone: function (e) {
         if (!e.name.trim()) { toast('Name is required'); return false; }
-        if (existing) { existing.name = e.name.trim(); existing.type = e.type; }
+        var options = cleanOptionDefs(e.options);
+        if (options === null) return false;
+        if (existing) { existing.name = e.name.trim(); existing.type = e.type; existing.options = options; }
         else {
-          var c = { id: (slug(e.name) || 'cat') + '-' + Math.random().toString(36).slice(2, 6), name: e.name.trim(), type: e.type };
+          var c = { id: (slug(e.name) || 'cat') + '-' + Math.random().toString(36).slice(2, 6), name: e.name.trim(), type: e.type, options: options };
           S.catalog.categories.push(c);
           S.catalogCat = c.id;
         }
@@ -963,6 +1028,7 @@
             '<option value="product"' + (e.type === 'product' ? ' selected' : '') + '>Product (parts)</option>' +
             '<option value="labor"' + (e.type === 'labor' ? ' selected' : '') + '>Labor / service</option></select></div>' +
         '</div><div class="group-foot">Type controls whether items print as “Part” or “Labor” on the invoice.</div>';
+        h += optionEditorHTML(e.options);
         if (existing) {
           var i = existing.id;
           var up = S.catalog.categories.findIndex(function (c) { return c.id === i; });
@@ -974,6 +1040,61 @@
         return h;
       }
     });
+  }
+
+  // Editor for the options asked when an item in this category is added.
+  function optionEditorHTML(options) {
+    var h = '<div class="group-title" style="margin-top:26px">Options asked when adding an item</div>';
+    h += options.map(function (o, i) {
+      var p = 'edit:options.' + i + '.';
+      var body = '<div class="row"><label>Name</label><input data-bind="' + p + 'label" placeholder="e.g. Logo" value="' + esc(o.label) + '"></div>' +
+        '<div class="row"><label>Type</label><select data-bind="' + p + 'type" data-rerender="1">' +
+          '<option value="choice"' + (o.type !== 'text' ? ' selected' : '') + '>Pick one choice</option>' +
+          '<option value="text"' + (o.type === 'text' ? ' selected' : '') + '>Type a description</option></select></div>' +
+        '<div class="row"><span class="grow">Required</span><label class="switch"><input type="checkbox" data-bind="' + p + 'required" data-type="bool"' + (o.required ? ' checked' : '') + '><span></span></label></div>';
+      if (o.type === 'text') {
+        body += '<div class="row"><label>Example text</label><input data-bind="' + p + 'placeholder" placeholder="e.g. 2° up, 1° strong" value="' + esc(o.placeholder || '') + '"></div>';
+      } else {
+        body += (o.choices || []).map(function (c, j) {
+          return '<div class="row"><div class="inline-inputs">' +
+            '<input data-bind="' + p + 'choices.' + j + '.name" placeholder="Choice" value="' + esc(c.name) + '">' +
+            '<input type="number" step="0.01" data-bind="' + p + 'choices.' + j + '.price" placeholder="Extra $0" value="' + esc(c.price ? c.price : '') + '" style="max-width:110px">' +
+            '</div><button class="x-btn" data-action="rm-choice" data-i="' + i + '" data-j="' + j + '" aria-label="Remove choice">⊖</button></div>';
+        }).join('') +
+        '<div class="row"><button class="btn plain" data-action="add-choice" data-i="' + i + '">' + ICON.plus + 'Add Choice</button></div>' +
+        '<div class="row"><span class="grow">Extra charges are taxable (parts)</span><label class="switch"><input type="checkbox" data-bind="' + p + 'taxable" data-type="bool"' + (o.taxable ? ' checked' : '') + '><span></span></label></div>';
+      }
+      return '<div class="group" style="margin-bottom:10px">' + body +
+        '<div class="row"><button class="btn plain danger" data-action="rm-option" data-i="' + i + '">Remove this option</button></div></div>';
+    }).join('');
+    h += '<div class="group"><div class="row"><button class="btn plain" data-action="add-option">' + ICON.plus + 'Add Option</button></div></div>' +
+      '<div class="group-foot">Examples: Logo (Up / Down, required), Extra wraps (+1…+10, $1 extra from +4), Loft &amp; Lie change (typed, required). ' +
+      'A choice with an extra price adds its own line to the invoice.</div>';
+    return h;
+  }
+
+  // Tidy up edited options; returns null (and shows why) if something's incomplete.
+  function cleanOptionDefs(options) {
+    var used = {};
+    var out = [];
+    for (var i = 0; i < (options || []).length; i++) {
+      var o = options[i];
+      var label = String(o.label || '').trim();
+      if (!label) { toast('Give every option a name'); return null; }
+      var id = o.id || slug(label) || 'opt';
+      while (used[id]) id += '-2';
+      used[id] = true;
+      var def = { id: id, label: label, type: o.type === 'text' ? 'text' : 'choice', required: !!o.required };
+      if (def.type === 'text') def.placeholder = String(o.placeholder || '').trim();
+      else {
+        def.taxable = !!o.taxable;
+        def.choices = (o.choices || []).filter(function (c) { return String(c.name || '').trim(); })
+          .map(function (c) { return { name: String(c.name).trim(), price: num(c.price) }; });
+        if (!def.choices.length) { toast('Add at least one choice to “' + label + '”'); return null; }
+      }
+      out.push(def);
+    }
+    return out;
   }
 
   // ================================================================ SETTINGS
@@ -1119,9 +1240,14 @@
     'add-item': function (el) {
       var item = itemById(el.dataset.id);
       if (!item) return;
-      if (item.sizes && item.sizes.length) openSizeSheet(item); else addItem(item);
+      if (needsChooser(item)) openAddSheet(item); else addItem(item);
     },
-    'pick-size': function (el) { closeSheet(); addItem(itemById(el.dataset.id), el.dataset.size); },
+    'opt-pick': function (el) {
+      var active = document.activeElement;
+      if (active && active.dataset && active.dataset.bind) onBind(active); // keep typed text
+      sheet.edit.opts[el.dataset.opt] = el.dataset.v;
+      refreshSheet();
+    },
     'custom-item': function () { openCustomSheet(); },
     'qty': function (el) {
       var line = S.draft.lines.find(function (l) { return l.uid === el.dataset.id; });
@@ -1191,6 +1317,10 @@
       refreshSheet();
     },
     'rm-size': function (el) { sheet.edit.sizes.splice(Number(el.dataset.i), 1); refreshSheet(); },
+    'add-option': function () { sheet.edit.options.push({ label: '', type: 'choice', required: false, choices: [{ name: '', price: '' }] }); refreshSheet(); },
+    'rm-option': function (el) { sheet.edit.options.splice(Number(el.dataset.i), 1); refreshSheet(); },
+    'add-choice': function (el) { var o = sheet.edit.options[Number(el.dataset.i)]; (o.choices = o.choices || []).push({ name: '', price: '' }); refreshSheet(); },
+    'rm-choice': function (el) { sheet.edit.options[Number(el.dataset.i)].choices.splice(Number(el.dataset.j), 1); refreshSheet(); },
     'add-link': function () { sheet.edit.links.push({ itemId: '', auto: true }); refreshSheet(); },
     'rm-link': function (el) { sheet.edit.links.splice(Number(el.dataset.i), 1); refreshSheet(); },
     'export-catalog': function () { download('robogolf-catalog-' + stamp() + '.json', S.catalog); },

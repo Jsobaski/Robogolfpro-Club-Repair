@@ -126,6 +126,13 @@ unlock creates it). Editing stays unlocked until the page is reloaded or you cli
   - **Linked items:** items added automatically at the same quantity (e.g. a new grip
     links to *Golf Grip Installation*). Turn *Auto* off to offer it as a one-tap option.
   - **Show in POS:** hide discontinued items without deleting them.
+- **Options per category** (*Edit Category → Options asked when adding an item*): questions
+  asked every time an item from that category is added. Out of the box:
+  - Grips and Putter Grips: **Logo** Up / Down (required) and **Extra wraps** +1…+10
+    (+4 and up add $1 per grip as a taxable line).
+  - Loft & Lie: **Change**, a required typed description such as "2° up, 1° strong".
+  Options can be *pick one choice* (each choice can carry an extra price) or *type a
+  description*, and can be required. They print on the invoice and the tag.
 - Changes save immediately. On the website they show on other devices the next time
   those devices are opened or focused. If two people edit at the same moment, the second
   save is refused and that person is asked to redo the change on the latest catalog, so

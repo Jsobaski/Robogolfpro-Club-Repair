@@ -66,3 +66,40 @@ test('formatMoney', () => {
   assert.equal(P.formatMoney(5), '$0.05');
   assert.equal(P.formatMoney(-250), '-$2.50');
 });
+
+test('grip options: logo required, +4 or more wraps adds $1 per grip (taxable)', () => {
+  const grips = DEFAULT_CATALOG.categories.find(c => c.id === 'grips');
+  assert.deepEqual(P.missingOptions(grips.options, {}).map(o => o.id), ['logo']);
+  assert.deepEqual(P.missingOptions(grips.options, { logo: 'Down' }), []);
+
+  const three = calc([{ uid: 'a', itemId: 'ss-crossline-2', qty: 2, opts: { logo: 'Down', wraps: '+3' } }]);
+  assert.deepEqual(three.rows[0].options, ['Logo Down', 'Extra wraps +3']);
+  assert.equal(three.rows.length, 2); // grip + install, no wrap charge
+
+  const five = calc([{ uid: 'a', itemId: 'ss-crossline-2', qty: 2, opts: { logo: 'Up', wraps: '+5' } }]);
+  const wrap = five.rows.find(r => r.isOption);
+  assert.equal(wrap.name, 'Extra wraps +5');
+  assert.equal(wrap.total, 200);
+  assert.equal(wrap.taxable, true);
+  assert.equal(five.taxableSubtotal, 2 * 699 + 200);
+});
+
+test('loft & lie requires a description of the change', () => {
+  const ll = DEFAULT_CATALOG.categories.find(c => c.id === 'loft-lie');
+  assert.equal(P.missingOptions(ll.options, { adjust: '  ' }).length, 1);
+  const r = calc([{ uid: 'a', itemId: 'lab-loft-lie', qty: 1, opts: { adjust: '2° up, 1° strong' } }]);
+  assert.deepEqual(r.rows[0].options, ['Change: 2° up, 1° strong']);
+  assert.equal(r.total, 500);
+});
+
+test('migration adds options to an old saved catalog once, without overwriting edits', () => {
+  const { migrateCatalog } = require('../app/catalog-defaults.js');
+  const old = JSON.parse(JSON.stringify(DEFAULT_CATALOG));
+  delete old.migrations;
+  old.categories.forEach(c => delete c.options);
+  migrateCatalog(old);
+  assert.equal(old.categories.find(c => c.id === 'grips').options.length, 2);
+  old.categories.find(c => c.id === 'grips').options = [];
+  migrateCatalog(old);
+  assert.equal(old.categories.find(c => c.id === 'grips').options.length, 0);
+});

@@ -87,7 +87,7 @@
   // (auto-added labor is left out), with quantity, size and the line's note.
   function tagWorkLines(rows) {
     return (rows || []).filter(function (r) { return !r.isLinked; }).map(function (r) {
-      return { qty: r.qty, name: r.name, size: r.size || '', note: r.note || '' };
+      return { qty: r.qty, name: r.name, size: r.size || '', options: r.options || [], note: r.note || '' };
     });
   }
 

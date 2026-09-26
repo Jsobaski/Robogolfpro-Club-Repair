@@ -89,6 +89,7 @@
         qty: qty,
         isLabor: opts.isLabor,
         isLinked: !!opts.isLinked,
+        isOption: !!opts.isOption,
         parentUid: opts.parentUid || null,
         taxable: opts.taxable,
         overridden: false,
@@ -130,7 +131,7 @@
       var isLabor = item ? (cat ? cat.type === 'labor' : !!item.isLabor) : !!line.isLabor;
       var taxable = item ? !!item.taxable : !!line.taxable;
 
-      pushRow({
+      var mainRow = pushRow({
         lineUid: line.uid,
         item: item,
         name: item ? item.name : (line.name || 'Custom item'),
@@ -141,6 +142,28 @@
         taxable: taxable,
         priceOverride: line.priceOverride,
         customPrice: line.price
+      });
+
+      // Category options (e.g. Logo Up/Down, extra wraps, loft & lie details).
+      var optDefs = cat && Array.isArray(cat.options) ? cat.options : [];
+      mainRow.options = describeOptions(optDefs, line.opts);
+      optDefs.forEach(function (o) {
+        if (o.type !== 'choice' || !line.opts) return;
+        var ch = (o.choices || []).find(function (c) { return c.name === line.opts[o.id]; });
+        if (!ch || !toCents(ch.price)) return;
+        // A choice with a price becomes its own line under the item.
+        pushRow({
+          lineUid: line.uid + ':opt:' + o.id,
+          parentUid: line.uid,
+          item: null,
+          name: optionText(o, ch.name),
+          qty: line.qty,
+          isLabor: !o.taxable,
+          isLinked: true,
+          isOption: true,
+          taxable: !!o.taxable,
+          customPrice: ch.price
+        });
       });
 
       if (!item || !Array.isArray(item.links)) return;
@@ -187,7 +210,34 @@
     };
   }
 
+  // "Logo" + "Down" -> "Logo Down"; "Extra wraps" + "+5" -> "Extra wraps +5"
+  function optionText(o, value) {
+    return o.type === 'text' ? (o.label ? o.label + ': ' : '') + value : (o.label ? o.label + ' ' : '') + value;
+  }
+
+  // Human-readable list of the options chosen on a line.
+  function describeOptions(optDefs, chosen) {
+    var out = [];
+    (optDefs || []).forEach(function (o) {
+      var v = chosen && chosen[o.id];
+      if (v === undefined || v === null || String(v).trim() === '') return;
+      out.push(optionText(o, String(v).trim()));
+    });
+    return out;
+  }
+
+  // Which required options are still missing for a line ([] when complete).
+  function missingOptions(optDefs, chosen) {
+    return (optDefs || []).filter(function (o) {
+      var v = chosen && chosen[o.id];
+      return o.required && (v === undefined || v === null || String(v).trim() === '');
+    });
+  }
+
   var api = {
+    optionText: optionText,
+    describeOptions: describeOptions,
+    missingOptions: missingOptions,
     toCents: toCents,
     fromCents: fromCents,
     formatMoney: formatMoney,

@@ -79,6 +79,41 @@
     ]
   };
 
+  /*
+   * Options asked when an item from a category is added to a ticket.
+   *   type 'choice': pick one of `choices`; a choice with a price adds a line
+   *                  (taxable when the option is `taxable`)
+   *   type 'text':   type a description
+   *   required:      must be filled in before the item can be added
+   */
+  var WRAP_CHOICES = [];
+  for (var w = 1; w <= 10; w++) WRAP_CHOICES.push({ name: '+' + w, price: w > 3 ? 1 : 0 });
+
+  var GRIP_OPTIONS = [
+    { id: 'logo', label: 'Logo', type: 'choice', required: true, choices: [{ name: 'Up', price: 0 }, { name: 'Down', price: 0 }] },
+    { id: 'wraps', label: 'Extra wraps', type: 'choice', required: false, taxable: true, choices: WRAP_CHOICES }
+  ];
+  var DEFAULT_OPTIONS = {
+    'grips': GRIP_OPTIONS,
+    'putter-grips': GRIP_OPTIONS,
+    'loft-lie': [{ id: 'adjust', label: 'Change', type: 'text', required: true, placeholder: 'e.g. 2° up, 1° strong' }]
+  };
+
+  // Brings a saved catalog up to date with features added after it was
+  // created. Each step runs once; later edits by the shop are never overwritten.
+  function migrateCatalog(catalog) {
+    if (!catalog || !Array.isArray(catalog.categories)) return catalog;
+    catalog.migrations = catalog.migrations || {};
+    if (!catalog.migrations.options1) {
+      catalog.categories.forEach(function (c) {
+        if (DEFAULT_OPTIONS[c.id] && !Array.isArray(c.options)) c.options = JSON.parse(JSON.stringify(DEFAULT_OPTIONS[c.id]));
+      });
+      catalog.migrations.options1 = true;
+    }
+    return catalog;
+  }
+  migrateCatalog(DEFAULT_CATALOG);
+
   var DEFAULT_SETTINGS = {
     // Clark County, NV combined rate (4.6% state + 3.775% local), effective 2020-01-01.
     taxRate: 8.375,
@@ -90,7 +125,7 @@
     footer: 'Thank you for choosing RoboGolfPro Las Vegas! Repair labor is separately stated and not subject to Nevada sales tax.'
   };
 
-  var api = { DEFAULT_CATALOG: DEFAULT_CATALOG, DEFAULT_SETTINGS: DEFAULT_SETTINGS };
+  var api = { DEFAULT_CATALOG: DEFAULT_CATALOG, DEFAULT_SETTINGS: DEFAULT_SETTINGS, migrateCatalog: migrateCatalog };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else { root.DEFAULT_CATALOG = DEFAULT_CATALOG; root.DEFAULT_SETTINGS = DEFAULT_SETTINGS; }
+  else { root.DEFAULT_CATALOG = DEFAULT_CATALOG; root.DEFAULT_SETTINGS = DEFAULT_SETTINGS; root.migrateCatalog = migrateCatalog; }
 })(this);
