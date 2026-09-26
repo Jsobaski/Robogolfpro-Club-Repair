@@ -15,7 +15,8 @@ test('compareVersions', () => {
 });
 
 test('downloads the release, swaps the executable and restarts', async (t) => {
-  const newBinary = Buffer.from('NEW VERSION BINARY');
+  // Starts with "MZ" like a real Windows program (the updater checks this on Windows).
+  const newBinary = Buffer.from('MZ NEW VERSION BIN');
   const digest = 'sha256:' + crypto.createHash('sha256').update(newBinary).digest('hex');
   let tamper = false;
   const server = http.createServer((req, res) => {
@@ -26,7 +27,7 @@ test('downloads the release, swaps the executable and restarts', async (t) => {
         assets: [{ name: 'app.bin', size: newBinary.length, digest, browser_download_url: 'http://127.0.0.1:' + server.address().port + '/app.bin' }]
       }));
     }
-    res.end(tamper ? Buffer.from('EVIL VERSION BINARY'.slice(0, 18)) : newBinary);
+    res.end(tamper ? Buffer.from('MZ EVIL VERSION BN') : newBinary);
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); server.close(); });
@@ -52,7 +53,7 @@ test('downloads the release, swaps the executable and restarts', async (t) => {
 
   tamper = false;
   await u.install();
-  assert.equal(fs.readFileSync(exe, 'utf8'), 'NEW VERSION BINARY');
+  assert.equal(fs.readFileSync(exe, 'utf8'), 'MZ NEW VERSION BIN');
   assert.equal(fs.readFileSync(path.join(dir, 'app.old.bin'), 'utf8'), 'OLD');
   assert.equal(restartedTo, '9.9.9');
 
