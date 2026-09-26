@@ -88,7 +88,8 @@ iPad/iPhone use Share → *Add to Home Screen*.
    Installation*; a shaft adds *Shaft Installation* (and offers *Save Grip*). Use −/+ to
    change quantity. Tap a line to pick a size, override a price, make it free, or add a
    note. Tap **Remove/Add** beside a linked labor line to switch it off or on.
-2. **Pickup:** set the **Ready** date/time (or tap Today / Tomorrow / 3 days / 1 week).
+2. **Pickup (optional):** off by default. Turn on *Set a ready-by date* to pick a date/time
+   (or tap Today / Tomorrow / 3 days / 1 week). When it's off, nothing prints.
 3. **Payment:** choose *Due at pickup*, *Paid* (Card / Cash / Other; for cash, enter the
    amount received to see the change) or *Deposit* (enter the amount; the balance due is
    shown and printed).

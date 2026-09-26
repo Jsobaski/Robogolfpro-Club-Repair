@@ -29,7 +29,7 @@
   function newDraft() {
     return {
       id: null, number: null, createdAt: null, customer: { name: '', phone: '', email: '' }, notes: '', lines: [],
-      readyBy: '', readyTime: '', payment: X.newPayment()
+      pickupOn: false, readyBy: '', readyTime: '', payment: X.newPayment()
     };
   }
 
@@ -623,7 +623,11 @@
     var d = S.draft, pay = d.payment;
     var today = new Date();
     function plus(n) { var x = new Date(today); x.setDate(x.getDate() + n); return X.ymd(x); }
+    // Pickup dates are optional: off by default, one tap to turn on.
     var h = '<div class="group-title">Pickup</div><div class="group">' +
+      '<div class="row"><span class="grow">Set a ready-by date</span>' +
+        '<label class="switch"><input type="checkbox" data-action-change="pickup-toggle"' + (d.pickupOn ? ' checked' : '') + '><span></span></label></div>';
+    if (d.pickupOn) h +=
       '<div class="row"><label>Ready</label><input type="date" class="field" data-bind="draft:readyBy" value="' + esc(d.readyBy) + '"></div>' +
       '<div class="row"><label>Time</label><input type="time" class="field" data-bind="draft:readyTime" value="' + esc(d.readyTime) + '"></div>' +
       '<div class="row quick">' +
@@ -631,9 +635,8 @@
         '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(1) + '">Tomorrow</button>' +
         '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(3) + '">3 days</button>' +
         '<button class="btn plain small" data-action="ready-quick" data-v="' + plus(7) + '">1 week</button>' +
-        (d.readyBy ? '<button class="btn plain small" data-action="ready-quick" data-v="" aria-label="Clear date">✕</button>' : '') +
-      '</div>' +
-    '</div>';
+      '</div>';
+    h += '</div>';
     h += '<div class="group-title">Payment</div><div class="group pay">' +
       '<div class="row">' + segmented('pay-status', pay.status, [['due', 'Due at pickup'], ['paid', 'Paid'], ['deposit', 'Deposit']]) + '</div>';
     if (pay.status !== 'due') {
@@ -1088,6 +1091,13 @@
   });
   document.addEventListener('change', function (ev) {
     var el = ev.target;
+    if (el.dataset && el.dataset.actionChange === 'pickup-toggle') {
+      S.draft.pickupOn = el.checked;
+      // Turning it off removes the date so nothing prints.
+      if (!el.checked) { S.draft.readyBy = ''; S.draft.readyTime = ''; }
+      renderPayment();
+      return;
+    }
     if (el.dataset && el.dataset.bind && (el.type === 'checkbox' || el.tagName === 'SELECT')) onBind(el);
   });
 
@@ -1139,7 +1149,7 @@
     'print-tags': function () { printTag(); },
     'pay-status': function (el) { S.draft.payment.status = el.dataset.v; renderPayment(); renderLines(); },
     'pay-method': function (el) { S.draft.payment.method = el.dataset.v; renderPayment(); renderLines(); },
-    'ready-quick': function (el) { S.draft.readyBy = el.dataset.v; if (!el.dataset.v) S.draft.readyTime = ''; renderPayment(); renderLines(); },
+    'ready-quick': function (el) { S.draft.readyBy = el.dataset.v; renderPayment(); renderLines(); },
 
     'catalog-cat': function (el) { S.catalogCat = el.dataset.id; renderCatalog(); },
     'add-category': function () { requireUnlock(function () { openCategoryEditor(null); }); },
