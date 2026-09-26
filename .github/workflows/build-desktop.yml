@@ -22,7 +22,12 @@ jobs:
 
       - run: npm ci
       - run: npm test
-      - run: npm run build:exe
+      - name: Build RoboGolfPOS.exe
+        shell: bash
+        run: |
+          # Release builds take their version from the tag (v1.4.0 -> 1.4.0).
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export APP_VERSION="${GITHUB_REF_NAME#v}"; fi
+          npm run build:exe
 
       - name: Smoke test the .exe
         shell: pwsh
@@ -33,6 +38,10 @@ jobs:
           Start-Sleep -Seconds 5
           $api = Invoke-RestMethod http://127.0.0.1:47817/api/catalog
           if (-not $api.configured -or $api.storage -ne 'local') { throw "API check failed" }
+          $info = Invoke-RestMethod http://127.0.0.1:47817/api/app-info
+          Write-Host "Built version $($info.version), updates enabled: $($info.updatesEnabled)"
+          if (-not $info.updatesEnabled) { throw "Updater not enabled" }
+          if ($env:GITHUB_REF -like 'refs/tags/v*' -and "v$($info.version)" -ne $env:GITHUB_REF_NAME) { throw "Version mismatch" }
           $page = Invoke-WebRequest http://127.0.0.1:47817/ -UseBasicParsing
           if ($page.Content -notmatch 'RoboGolfPro Repair POS') { throw "Page check failed" }
           Stop-Process -Id $p.Id
@@ -49,3 +58,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/RoboGolfPOS.exe
+          generate_release_notes: true

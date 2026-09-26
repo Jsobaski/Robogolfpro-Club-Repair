@@ -18,12 +18,8 @@ Both run the same app. Tickets are never saved in either one: ring up, print, pr
 
 ## Windows app (.exe)
 
-**Getting the .exe:** GitHub builds it automatically on every push.
-1. Open the repository on GitHub → **Actions** tab → **Build Windows app**.
-2. Click the newest run with a green check, then scroll to **Artifacts** and download
-   **RoboGolfPOS-windows**. Unzip it to get `RoboGolfPOS.exe`.
-   (For a permanent download link, push a tag like `v1.2.0`. The .exe is then attached to a
-   GitHub Release.)
+**Getting the .exe:** download **RoboGolfPOS.exe** from the latest release:
+https://github.com/Jsobaski/Robogolfpro-Club-Repair/releases/latest
 
 **Installing on the shop PC:**
 1. Make a folder such as `Documents\RoboGolf POS` and put `RoboGolfPOS.exe` in it.
@@ -42,6 +38,24 @@ Both run the same app. Tickets are never saved in either one: ring up, print, pr
   this file and choose a new one.
 - **Back up** by copying the folder to a USB drive or OneDrive. **Move to a new PC** by
   copying the .exe and the folder together.
+
+**Updates are automatic.** When the app starts, and every 6 hours after that, it checks
+GitHub for a newer release. If there is one, a banner says **Update available → Install
+Update**. The app downloads the new version, checks it against the size and checksum GitHub
+lists for that file, swaps it in and restarts in a few seconds. The data folder is never
+touched. If a download fails, the current version keeps running unchanged. The version
+number and a *Check for Updates* button are in **Settings**.
+
+**Publishing an update:**
+1. Push your changes. (Every push also builds a test .exe under the Actions tab.)
+2. Create a release tag with a higher version number, for example:
+   `git tag v1.4.0 && git push origin v1.4.0`
+   (or on GitHub: *Releases → Draft a new release → choose a new tag `v1.4.0` → Publish*.)
+3. GitHub Actions builds `RoboGolfPOS.exe` for that version, tests it and attaches it to the
+   release, which takes about 2 minutes. Shop PCs pick it up the next time they check.
+
+Tags must look like `v1.4.0`, and each one must be higher than the last. Releases
+marked *pre-release* are ignored by the updater.
 
 The app only listens on the PC itself (`127.0.0.1`); other computers on the network can't
 reach it. To quit, close the black window.
@@ -117,6 +131,7 @@ api/verify-pin.js         POST { pin } (desktop: first PIN creates it)
 lib/store.js              storage: Upstash REST (cloud) or JSON file (desktop/dev)
 lib/local-server.js       HTTP server used by the desktop app and dev server
 desktop/main.js           desktop entry: data folder, server on 127.0.0.1:47817, app window
+desktop/updater.js        checks GitHub Releases, downloads + swaps the .exe, restarts
 scripts/build-exe.js      packages desktop/main.js + app/ into one executable (Node SEA)
 .github/workflows/        builds and smoke-tests RoboGolfPOS.exe on Windows
 tests/                    `npm test`

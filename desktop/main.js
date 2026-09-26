@@ -17,6 +17,9 @@ let sea = null;
 try { sea = require('node:sea'); } catch (e) { /* older Node, dev only */ }
 const packaged = !!(sea && sea.isSea());
 
+/* global __APP_VERSION__ */
+const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : require('../package.json').version;
+const AFTER_UPDATE = process.argv.includes('--after-update');
 const PORT = Number(process.env.ROBOGOLF_PORT) || 47817;
 const URL = 'http://127.0.0.1:' + PORT + '/';
 const APP_NAME = 'RoboGolf POS';
@@ -105,11 +108,44 @@ function waitForKeyThenExit(code) {
   process.stdin.once('data', () => process.exit(code));
 }
 
+// ---------------------------------------------------------------- updates
+const { createUpdater } = require('./updater');
+
+function restartInto(newVersion) {
+  console.log('\nUpdating to version ' + newVersion + ' and restarting...');
+  const exe = process.execPath;
+  const opts = { detached: true, stdio: 'ignore' };
+  if (process.platform === 'win32') {
+    // "start" gives the new version its own console window.
+    spawn('cmd', ['/c start "" "' + exe + '" --after-update'], Object.assign({ windowsVerbatimArguments: true }, opts)).unref();
+  } else {
+    spawn(exe, ['--after-update'], opts).unref();
+  }
+  // Let the HTTP response reach the app window, then free the port for the new version.
+  setTimeout(() => { server.close(); process.exit(0); }, 400);
+}
+
+const updater = createUpdater({
+  currentVersion: VERSION,
+  exePath: process.execPath,
+  enabled: (packaged && process.platform === 'win32') || !!process.env.ROBOGOLF_UPDATE_TEST,
+  onRestart: restartInto
+});
+
 // ---------------------------------------------------------------- start
 const { createServer } = require('../lib/local-server');
-const server = createServer(readStatic);
+const server = createServer(readStatic, {
+  extraRoutes: updater.routes,
+  allowedHosts: ['127.0.0.1:' + PORT, 'localhost:' + PORT]
+});
 
+let listenTries = 0;
 server.on('error', async (err) => {
+  // Right after an update the previous version may still be shutting down.
+  if (err.code === 'EADDRINUSE' && AFTER_UPDATE && ++listenTries < 30) {
+    setTimeout(() => server.listen(PORT, '127.0.0.1'), 500);
+    return;
+  }
   if (err.code === 'EADDRINUSE') {
     if (await alreadyRunning()) {
       console.log(APP_NAME + ' is already running — opening another window.');
@@ -127,7 +163,7 @@ server.on('error', async (err) => {
 server.listen(PORT, '127.0.0.1', () => {
   if (process.platform === 'win32') process.title = APP_NAME;
   console.log('==============================================');
-  console.log('  ' + APP_NAME + ' is running');
+  console.log('  ' + APP_NAME + ' ' + VERSION + ' is running');
   console.log('==============================================');
   console.log('  Keep this window open while using the app');
   console.log('  (you can minimize it). Close it to quit.');
@@ -137,5 +173,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('');
   console.log('  If the app window closed, reopen it at:');
   console.log('  ' + URL);
-  openWindow();
+  updater.start();
+  // After an update the existing app window reloads itself.
+  if (!AFTER_UPDATE) openWindow();
 });

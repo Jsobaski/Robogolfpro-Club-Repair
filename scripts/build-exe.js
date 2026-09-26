@@ -34,6 +34,8 @@ async function main() {
     target: 'node' + process.versions.node.split('.')[0],
     outfile: path.join(build, 'main.cjs'),
     external: ['node:sea'],
+    // Release builds pass the tag (e.g. APP_VERSION=1.3.0) so the app knows its version.
+    define: { __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || require('../package.json').version) },
     logLevel: 'warning'
   });
 
@@ -71,8 +73,8 @@ async function main() {
     const { rcedit } = await import('rcedit');
     await rcedit(out, {
       icon: path.join(root, 'desktop', 'icon.ico'),
-      'file-version': require('../package.json').version,
-      'product-version': require('../package.json').version,
+      'file-version': process.env.APP_VERSION || require('../package.json').version,
+      'product-version': process.env.APP_VERSION || require('../package.json').version,
       'version-string': {
         ProductName: 'RoboGolf POS',
         FileDescription: 'RoboGolf POS',

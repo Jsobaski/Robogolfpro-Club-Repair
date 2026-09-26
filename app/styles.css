@@ -365,3 +365,10 @@ textarea.notes {
 }
 .notice.bad { background: rgba(255, 59, 48, .12); }
 .row input:disabled { color: var(--label-2); }
+
+/* ---------- Update overlay ---------- */
+.overlay { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+.overlay-card { background: var(--bg-elevated); border-radius: 16px; padding: 28px 36px; text-align: center; box-shadow: var(--shadow-sheet); min-width: 260px; }
+.overlay-title { font-weight: 600; font-size: 17px; margin: 14px 0 4px; }
+.spinner { width: 28px; height: 28px; margin: 0 auto; border-radius: 50%; border: 3px solid var(--fill-2); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

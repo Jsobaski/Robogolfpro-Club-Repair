@@ -66,7 +66,7 @@
   }
 
   function api(method, path, body) {
-    var headers = { 'Content-Type': 'application/json' };
+    var headers = { 'Content-Type': 'application/json', 'x-robogolf': '1' };
     if (Remote.pin) headers['x-admin-pin'] = Remote.pin;
     return fetch(path, { method: method, headers: headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined })
       .then(function (res) {
@@ -85,6 +85,7 @@
         Remote.pinStatus = r.pin || 'set';
         Remote.location = r.location || null;
         if (r.data) apply(r.data);
+        if (Remote.storage === 'local') loadAppInfo();
         else { Remote.version = 0; }
       }
       if (!sheet || !quiet) render();
@@ -97,6 +98,71 @@
   }
 
   function canEdit() { return Remote.mode === 'online'; }
+
+  // ---------------------------------------------------------------- desktop updates
+  var App = { info: null, busy: false };
+
+  function loadAppInfo() {
+    return api('GET', '/api/app-info').then(function (r) {
+      if (r.status !== 200) return;
+      var had = App.info && App.info.available;
+      App.info = r;
+      if (!had && r.available && !sheet) render(); else renderMeta();
+    }).catch(function () {});
+  }
+
+  function updateBanner() {
+    var i = App.info;
+    if (!i || !i.available) return '';
+    return '<div class="notice"><span><strong>Update available:</strong> version ' + esc(i.latest.version) +
+      ' (you have ' + esc(i.version) + '). Your catalog and settings are kept.</span>' +
+      '<button class="btn primary" data-action="install-update">Install Update</button></div>';
+  }
+
+  function installUpdate() {
+    var i = App.info;
+    if (!i || !i.available || App.busy) return;
+    if (!confirm('Install version ' + i.latest.version + ' now?\n\nThe app will restart in a few seconds. ' +
+      (S.draft.lines.length ? 'The ticket in progress will be cleared. ' : '') + 'Your catalog and settings are kept.')) return;
+    App.busy = true;
+    var target = i.latest.version;
+    showOverlay('Downloading update…', 'Version ' + target + '. This can take a minute.');
+    api('POST', '/api/update/install').then(function (r) {
+      if (r.status !== 200) throw new Error(r.error || 'Update failed');
+      showOverlay('Restarting…', 'Almost done.');
+      var started = Date.now();
+      (function poll() {
+        api('GET', '/api/app-info').then(function (x) {
+          if (x.status === 200 && x.version === target) {
+            S.draft = newDraft(); // nothing to warn about on reload
+            location.reload();
+          } else retry();
+        }).catch(retry);
+        function retry() {
+          if (Date.now() - started > 120000) {
+            hideOverlay(); App.busy = false;
+            alert('The update was installed but the app did not come back. Close this window and start RoboGolf POS again.');
+          } else setTimeout(poll, 1500);
+        }
+      })();
+    }).catch(function (e) {
+      hideOverlay(); App.busy = false;
+      alert('Could not install the update: ' + e.message);
+      loadAppInfo();
+    });
+  }
+
+  function showOverlay(title, sub) {
+    var el = document.getElementById('overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'overlay';
+      el.className = 'overlay';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<div class="overlay-card"><div class="spinner"></div><div class="overlay-title">' + esc(title) + '</div><div class="muted small">' + esc(sub) + '</div></div>';
+  }
+  function hideOverlay() { var el = document.getElementById('overlay'); if (el) el.remove(); }
 
   // Save catalog + settings to the server. The local copy is updated first; on
   // failure the server copy is reloaded so screens never show unsaved data.
@@ -241,6 +307,7 @@
     else if (Remote.mode === 'unconfigured') status = '<span class="dot bad"></span>Storage not connected — using built-in prices';
     else status = '<span class="dot bad"></span>Offline — using built-in prices';
     document.getElementById('sideMeta').innerHTML = status + '<br>Sales tax ' + esc(S.settings.taxRate) + '%' +
+      (App.info ? ' · v' + esc(App.info.version) : '') +
       (Remote.pin ? ' · <a href="#" data-action="lock">Lock editing</a>' : '');
   }
 
@@ -267,6 +334,7 @@
     var d = S.draft;
     var el = document.getElementById('view-ticket');
     el.innerHTML =
+      updateBanner() +
       '<div class="pos">' +
         '<div class="picker">' +
           '<div class="title-row">' +
@@ -780,6 +848,7 @@
         '<div class="row"><label>Footer message</label><input data-bind="settings:footer" value="' + esc(s.footer) + '"' + dis + '></div>' +
       '</div>' +
       (locked ? '' : '<div style="margin-top:14px;display:flex;gap:8px"><button class="btn primary lg" data-action="save-settings">Save Settings</button><button class="btn lg" data-action="revert-settings">Revert</button></div>') +
+      aboutSection() +
       '<div class="group-title">Backup</div><div class="group">' +
         '<div class="row tap" data-action="export-all"><span class="grow">Download backup</span><span class="end small">Catalog & settings' + ICON.chev + '</span></div>' +
         '<div class="row tap" data-action="import-all"><span class="grow">Restore from backup…</span>' + ICON.chev + '</div>' +
@@ -787,6 +856,21 @@
         ? 'The catalog is saved in <b>' + esc(Remote.location) + '</b> (catalog.json, plus catalog.json.bak with the previous version). Copy that folder to a USB drive or cloud folder to back it up.'
         : 'The catalog is stored online. A downloaded backup lets you restore it if something is deleted by mistake.') + '</div>' +
       '</div>';
+  }
+
+  function aboutSection() {
+    var i = App.info;
+    if (!i) return '';
+    var status;
+    if (!i.updatesEnabled) status = 'Automatic updates are only available in the Windows app.';
+    else if (i.error) status = esc(i.error);
+    else if (i.available) status = 'Version ' + esc(i.latest.version) + ' is available.';
+    else status = 'Up to date' + (i.checkedAt ? ' (checked ' + esc(fmtDateTime(i.checkedAt)) + ')' : '') + '.';
+    return '<div class="group-title">App version</div><div class="group">' +
+      '<div class="row"><span class="grow">RoboGolf POS ' + esc(i.version) + '<br><span class="muted small">' + status + '</span></span>' +
+      (i.available ? '<button class="btn primary" data-action="install-update">Install Update</button>'
+        : i.updatesEnabled ? '<button class="btn" data-action="check-update">Check for Updates</button>' : '') +
+      '</div></div><div class="group-foot">The app checks for new versions when it starts and every few hours. Updating never changes your catalog, settings or PIN.</div>';
   }
 
   // ---------------------------------------------------------------- files
@@ -979,6 +1063,14 @@
       persist('Settings saved');
     },
     'revert-settings': function () { settingsEdit = null; renderSettings(); },
+    'install-update': function () { installUpdate(); },
+    'check-update': function (el) {
+      el.disabled = true; el.textContent = 'Checking…';
+      api('POST', '/api/update/check').then(function (r) {
+        if (r.status === 200) { App.info = r; toast(r.available ? 'Update available' : (r.error || 'You have the latest version')); }
+        render();
+      }).catch(function () { toast('Could not check for updates'); render(); });
+    },
     'unlock': function () { requireUnlock(function () { settingsEdit = null; render(); }); },
     'lock': function (el, ev) { ev.preventDefault(); Remote.pin = null; settingsEdit = null; render(); toast('Editing locked'); },
 
