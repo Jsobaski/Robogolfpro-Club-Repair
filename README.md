@@ -95,7 +95,8 @@ iPad/iPhone use Share → *Add to Home Screen*.
    shown and printed).
 4. **Invoice** prints the invoice with ready-by date, payment and balance due.
    **Tag** prints one tag for the order to attach to the customer's clubs: name, phone,
-   ticket #, number of clubs, work, ready-by and PAID / amount due. Both use the same
+   ticket #, number of clubs, each item with its size and line note, the ticket Notes,
+   ready-by and PAID / amount due. It doubles as the work sheet for whoever does the repair. Both use the same
    ticket number (e.g. `260926-143205`). Then press **Clear** for the next customer.
 
 The tag prints on regular paper (cut out the 3.75 × 2 in tag) or on a label printer:

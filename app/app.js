@@ -731,7 +731,11 @@
       '<div class="tag-name">' + esc(t.customer.name || 'No name') + '</div>' +
       (t.customer.phone ? '<div class="tag-phone">' + esc(t.customer.phone) + '</div>' : '') +
       '<div class="tag-club">' + clubs + ' club' + (clubs === 1 ? '' : 's') + '</div>' +
-      '<div class="tag-work">' + esc(X.tagWorkSummary(c.rows)) + '</div>' +
+      '<ul class="tag-items">' + X.tagWorkLines(c.rows).map(function (w) {
+        return '<li><b>' + w.qty + '×</b> ' + esc(w.name) + (w.size ? ' <span class="tag-size">(' + esc(w.size) + ')</span>' : '') +
+          (w.note ? '<div class="tag-line-note">' + esc(w.note) + '</div>' : '') + '</li>';
+      }).join('') + '</ul>' +
+      (t.notes && t.notes.trim() ? '<div class="tag-notes"><div class="tag-notes-lbl">Notes</div>' + esc(t.notes.trim()) + '</div>' : '') +
       '<div class="tag-foot"><span>' + (t.readyBy ? 'Ready ' + esc(X.formatReadyBy(t.readyBy, t.readyTime)) : '') + '</span>' +
         '<span>' + (sm.balanceDue === 0 ? 'PAID' : 'Due ' + money(sm.balanceDue)) + '</span></div>' +
     '</div>';
@@ -772,7 +776,7 @@
       if (r.parts.length > 1) det.push(rowDetail(r));
       if (r.note) det.push(esc(r.note));
       return '<tr class="' + (r.isLinked ? 'linked-row' : '') + '">' +
-        '<td>' + (r.isLinked ? '↳ ' : '') + esc(r.name) + (r.taxable ? '<span class="tax-mark">T</span>' : '') +
+        '<td>' + (r.isLinked ? '+ ' : '') + esc(r.name) + (r.taxable ? '<span class="tax-mark">T</span>' : '') +
           (det.length ? '<div class="det">' + det.join(' · ') + '</div>' : '') + '</td>' +
         '<td>' + (r.isLabor ? 'Labor' : 'Part') + '</td>' +
         '<td class="num">' + r.qty + '</td>' +

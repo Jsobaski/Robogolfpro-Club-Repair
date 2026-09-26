@@ -83,6 +83,14 @@
     return seen.join(', ');
   }
 
+  // Work list for the repair tag: one entry per item the customer asked for
+  // (auto-added labor is left out), with quantity, size and the line's note.
+  function tagWorkLines(rows) {
+    return (rows || []).filter(function (r) { return !r.isLinked; }).map(function (r) {
+      return { qty: r.qty, name: r.name, size: r.size || '', note: r.note || '' };
+    });
+  }
+
   // Number of clubs on the order = the largest quantity on any line (10 grips -> 10 clubs).
   function clubCount(lines) {
     var max = 0;
@@ -97,6 +105,7 @@
     formatReadyBy: formatReadyBy,
     ymd: ymd,
     tagWorkSummary: tagWorkSummary,
+    tagWorkLines: tagWorkLines,
     clubCount: clubCount
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

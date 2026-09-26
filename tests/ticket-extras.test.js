@@ -45,6 +45,8 @@ test('tag helpers', () => {
     { name: 'Loft and Lie Adjustment' }
   ];
   assert.equal(X.tagWorkSummary(rows), 'Golf Pride CP2 Wrap (Midsize), Loft and Lie Adjustment');
+  assert.deepEqual(X.tagWorkLines([{ qty: 2, name: 'Ventus Black 6S', note: 'tip 1 in' }, { qty: 2, name: 'Install', isLinked: true }]),
+    [{ qty: 2, name: 'Ventus Black 6S', size: '', note: 'tip 1 in' }]);
   assert.equal(X.clubCount([{ qty: 10 }, { qty: 3 }]), 10);
   assert.equal(X.clubCount([]), 1);
 });

@@ -399,13 +399,16 @@ textarea.notes {
 .tag-foot { margin-top: auto; display: flex; justify-content: space-between; gap: 6px; font-weight: 700; }
 
 /* Regular paper: one 3.75 x 2 in tag, cut out along the dashed border */
-.tags-sheet .tag { width: 3.75in; height: 2in; border: 1px dashed #888; padding: .14in .18in; gap: 2px; }
+/* Grows taller when there are many items or long notes. */
+.tags-sheet .tag { width: 3.75in; min-height: 2in; border: 1px dashed #888; padding: .14in .18in; gap: 2px; overflow: visible; }
 .tags-sheet .tag-top img { height: .32in; }
 .tags-sheet .tag-num { font-size: 12pt; }
 .tags-sheet .tag-name { font-size: 16pt; margin-top: 4px; }
 .tags-sheet .tag-phone { font-size: 11pt; }
 .tags-sheet .tag-club { font-size: 11pt; }
-.tags-sheet .tag-work { font-size: 9pt; -webkit-line-clamp: 2; }
+.tags-sheet .tag-items { font-size: 9.5pt; }
+.tags-sheet .tag-notes { font-size: 10pt; }
+.tags-sheet .tag-foot { margin-top: 8px; }
 .tags-sheet .tag-foot { font-size: 10pt; }
 
 /* Label printer: the tag fills the label */
@@ -414,8 +417,19 @@ textarea.notes {
 .tags-label .tag-num { font-size: 8pt; }
 .tags-label .tag-name { font-size: 11pt; }
 .tags-label .tag-phone, .tags-label .tag-club { font-size: 8pt; }
-.tags-label .tag-work { font-size: 6.5pt; -webkit-line-clamp: 1; }
+.tags-label .tag-items { font-size: 6.5pt; }
+.tags-label .tag-items li:nth-child(n+3) { display: none; }
+.tags-label .tag-line-note { display: none; }
+.tags-label .tag-notes { font-size: 6.5pt; border: 0; padding: 0; margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.tags-label .tag-notes-lbl { display: none; }
 .tags-label .tag-foot { font-size: 7pt; }
 .ticket .row input.field { flex: 1; background: var(--bg-elevated); border-radius: 8px; padding: 5px 8px; text-align: left !important; font-size: 14px; }
 @media (prefers-color-scheme: dark) { .ticket .row input.field { background: #3a3a3c; } }
 .row.quick { gap: 0; }
+
+.tag-items { list-style: none; margin: 4px 0 0; padding: 0; }
+.tag-items li { padding: 1px 0; }
+.tag-size { color: #444; }
+.tag-line-note { font-size: .9em; color: #333; padding-left: 1.6em; font-style: italic; }
+.tag-notes { margin-top: 6px; border: 1px solid #bbb; border-radius: 4px; padding: 4px 6px; white-space: pre-wrap; line-height: 1.3; }
+.tag-notes-lbl { font-size: 7pt; letter-spacing: .08em; text-transform: uppercase; color: #666; font-weight: 700; }
