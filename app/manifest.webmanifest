@@ -1,0 +1,11 @@
+{
+  "name": "RoboGolfPro Repair POS",
+  "short_name": "RoboGolf POS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f0821e",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

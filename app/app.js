@@ -5,29 +5,6 @@
   var P = window.Pricing;
   var money = P.formatMoney;
 
-  // ---------------------------------------------------------------- storage
-  var KEYS = {
-    catalog: 'rgp.catalog.v1',
-    settings: 'rgp.settings.v1',
-    tickets: 'rgp.tickets.v1',
-    draft: 'rgp.draft.v1'
-  };
-
-  function load(key, fallback) {
-    try {
-      var raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : clone(fallback);
-    } catch (e) {
-      return clone(fallback);
-    }
-  }
-  function store(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (e) {
-      toast('Could not save — browser storage unavailable');
-    }
-  }
   function clone(o) { return o === undefined ? o : JSON.parse(JSON.stringify(o)); }
   function uid(prefix) { return (prefix || '') + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function esc(s) {
@@ -53,23 +30,138 @@
   }
 
   // ---------------------------------------------------------------- state
+  // The catalog and settings live on the server (/api/catalog), shared by every
+  // device. The ticket being rung up is kept in memory only and is never saved.
   var S = {
-    catalog: load(KEYS.catalog, window.DEFAULT_CATALOG),
-    settings: Object.assign(clone(window.DEFAULT_SETTINGS), load(KEYS.settings, {})),
-    tickets: load(KEYS.tickets, []),
-    draft: load(KEYS.draft, newDraft()),
+    catalog: clone(window.DEFAULT_CATALOG),
+    settings: clone(window.DEFAULT_SETTINGS),
+    draft: newDraft(),
     view: 'ticket',
     posCat: null,
     search: '',
-    catalogCat: null,
-    historyQuery: ''
+    catalogCat: null
   };
   var sheet = null; // { el, edit, onDone }
 
-  function saveCatalog() { store(KEYS.catalog, S.catalog); }
-  function saveSettings() { store(KEYS.settings, S.settings); }
-  function saveTickets() { store(KEYS.tickets, S.tickets); }
-  function saveDraft() { store(KEYS.draft, S.draft); }
+  // ---------------------------------------------------------------- server sync
+  var Remote = {
+    mode: 'loading',   // loading | online | unconfigured | offline
+    version: 0,
+    updatedAt: null,
+    pin: null,         // admin PIN, kept in memory for this page only
+    saving: false,
+    error: null
+  };
+
+  function apply(data) {
+    if (!data) return;
+    if (validCatalog(data.catalog)) S.catalog = data.catalog;
+    S.settings = Object.assign(clone(window.DEFAULT_SETTINGS), data.settings || {});
+    Remote.version = data.version || 0;
+    Remote.updatedAt = data.updatedAt || null;
+    settingsEdit = null;
+  }
+
+  function api(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (Remote.pin) headers['x-admin-pin'] = Remote.pin;
+    return fetch(path, { method: method, headers: headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (json) { json.status = res.status; return json; });
+      });
+  }
+
+  function loadRemote(quiet) {
+    if (location.protocol === 'file:') { Remote.mode = 'offline'; render(); return Promise.resolve(); }
+    return api('GET', '/api/catalog').then(function (r) {
+      if (r.status !== 200) throw new Error(r.error || 'HTTP ' + r.status);
+      if (!r.configured) { Remote.mode = 'unconfigured'; Remote.error = r.error; }
+      else {
+        Remote.mode = 'online';
+        if (r.data) apply(r.data);
+        else { Remote.version = 0; }
+      }
+      if (!sheet || !quiet) render();
+    }).catch(function (e) {
+      Remote.mode = 'offline';
+      Remote.error = e.message;
+      render();
+      if (!quiet) toast('Could not reach the server — using built-in prices');
+    });
+  }
+
+  function canEdit() { return Remote.mode === 'online'; }
+
+  // Save catalog + settings to the server. The local copy is updated first; on
+  // failure the server copy is reloaded so screens never show unsaved data.
+  function persist(successMsg) {
+    if (!canEdit()) { toast('Not connected — changes cannot be saved'); loadRemote(true); return Promise.resolve(false); }
+    Remote.saving = true;
+    renderMeta();
+    return api('PUT', '/api/catalog', { catalog: S.catalog, settings: S.settings, baseVersion: Remote.version })
+      .then(function (r) {
+        Remote.saving = false;
+        if (r.status === 200) {
+          apply(r.data);
+          if (successMsg) toast(successMsg);
+          render();
+          return true;
+        }
+        if (r.status === 409) {
+          apply(r.data);
+          alert('The catalog was changed on another device, so your last change was not saved.\n\nThe latest catalog has been loaded — please make your change again.');
+        } else if (r.status === 401) {
+          Remote.pin = null;
+          alert('Wrong or expired PIN. Unlock editing again to save changes.');
+          loadRemote(true);
+        } else {
+          alert('Could not save: ' + (r.error || 'server error ' + r.status));
+          loadRemote(true);
+        }
+        render();
+        return false;
+      })
+      .catch(function () {
+        Remote.saving = false;
+        alert('Could not save — check the internet connection.');
+        loadRemote(true);
+        return false;
+      });
+  }
+
+  // Run `fn` once the admin PIN has been entered.
+  function requireUnlock(fn) {
+    if (!canEdit()) {
+      toast(Remote.mode === 'unconfigured' ? 'Storage not connected — see README' : 'Not connected — editing is unavailable');
+      return;
+    }
+    if (Remote.pin) { fn(); return; }
+    openSheet({
+      title: 'Unlock Editing',
+      done: 'Unlock',
+      edit: { pin: '' },
+      onDone: function (e) {
+        var pin = String(e.pin || '');
+        if (!pin) return false;
+        api('POST', '/api/verify-pin', { pin: pin }).then(function (r) {
+          if (r.status === 200) {
+            Remote.pin = pin;
+            closeSheet();
+            render();
+            fn();
+          } else {
+            toast(r.error || 'Wrong PIN');
+          }
+        }).catch(function () { toast('Could not reach the server'); });
+        return false; // keep the sheet open until the server answers
+      },
+      renderBody: function (e) {
+        return '<div class="group-title">Admin PIN</div><div class="group">' +
+          '<div class="row"><label>PIN</label><input type="password" autocomplete="off" autofocus data-bind="edit:pin" value="' + esc(e.pin) + '"></div>' +
+          '</div><div class="group-foot">Needed to change the catalog or settings. Staff can ring up tickets without it.</div>';
+      }
+    });
+  }
 
   function itemById(id) { return S.catalog.items.find(function (i) { return i.id === id; }); }
   function catById(id) { return S.catalog.categories.find(function (c) { return c.id === id; }); }
@@ -112,7 +204,7 @@
   function go(view) {
     S.view = view;
     document.querySelectorAll('#nav button').forEach(function (b) { b.classList.toggle('active', b.dataset.view === view); });
-    ['ticket', 'history', 'catalog', 'settings'].forEach(function (v) {
+    ['ticket', 'catalog', 'settings'].forEach(function (v) {
       document.getElementById('view-' + v).classList.toggle('hidden', v !== view);
     });
     render();
@@ -120,11 +212,32 @@
 
   function render() {
     if (S.view === 'ticket') renderTicketView();
-    else if (S.view === 'history') renderHistory();
     else if (S.view === 'catalog') renderCatalog();
     else if (S.view === 'settings') renderSettings();
-    document.getElementById('sideMeta').textContent =
-      'Sales tax ' + S.settings.taxRate + '% · ' + S.tickets.length + ' saved ticket' + (S.tickets.length === 1 ? '' : 's');
+    renderMeta();
+  }
+
+  function renderMeta() {
+    var status;
+    if (Remote.saving) status = '<span class="dot busy"></span>Saving…';
+    else if (Remote.mode === 'online') status = '<span class="dot ok"></span>Catalog synced' + (Remote.updatedAt ? '<br>Updated ' + esc(fmtDateTime(Remote.updatedAt)) : '');
+    else if (Remote.mode === 'loading') status = '<span class="dot busy"></span>Loading catalog…';
+    else if (Remote.mode === 'unconfigured') status = '<span class="dot bad"></span>Storage not connected — using built-in prices';
+    else status = '<span class="dot bad"></span>Offline — using built-in prices';
+    document.getElementById('sideMeta').innerHTML = status + '<br>Sales tax ' + esc(S.settings.taxRate) + '%' +
+      (Remote.pin ? ' · <a href="#" data-action="lock">Lock editing</a>' : '');
+  }
+
+  function lockBar(what) {
+    if (!canEdit()) {
+      return '<div class="notice bad">' + (Remote.mode === 'unconfigured'
+        ? 'Storage is not connected to this Vercel project, so ' + what + ' cannot be saved. See the README (“Deploying to Vercel”).'
+        : Remote.mode === 'loading' ? 'Loading…'
+        : 'Can’t reach the server, so ' + what + ' can’t be edited right now. Showing the built-in defaults.') + '</div>';
+    }
+    if (Remote.pin) return '';
+    return '<div class="notice"><span>' + what.charAt(0).toUpperCase() + what.slice(1) + ' are locked. Changes require the admin PIN.</span>' +
+      '<button class="btn primary" data-action="unlock">Unlock</button></div>';
   }
 
   // ================================================================ TICKET VIEW
@@ -144,8 +257,7 @@
           '<div class="grid" id="itemGrid"></div>' +
         '</div>' +
         '<div class="ticket">' +
-          '<div class="ticket-head"><h2>' + (d.id ? 'Ticket' : 'New Ticket') + '</h2><span class="num">' +
-            esc(d.number || 'Not saved') + (d.createdAt ? ' · ' + esc(fmtDate(d.createdAt)) : '') + '</span></div>' +
+          '<div class="ticket-head"><h2>Ticket</h2><span class="num">' + esc(fmtDate(new Date().toISOString())) + '</span></div>' +
           '<div class="ticket-body">' +
             '<div class="group-title">Customer</div>' +
             '<div class="group">' +
@@ -160,8 +272,7 @@
           '</div>' +
           '<div class="totals" id="totals"></div>' +
           '<div class="ticket-actions">' +
-            '<button class="btn" data-action="new-ticket">New</button>' +
-            '<button class="btn" data-action="save-ticket">Save</button>' +
+            '<button class="btn" data-action="new-ticket">Clear</button>' +
             '<button class="btn primary" data-action="print-ticket">' + ICON.print + 'Print</button>' +
           '</div>' +
         '</div>' +
@@ -261,7 +372,6 @@
   }
 
   function draftChanged() {
-    saveDraft();
     if (S.view === 'ticket') renderLines();
   }
 
@@ -404,35 +514,22 @@
 
   // ---------------- save / print
   function hasContent(d) {
-    return d.lines.length || d.customer.name || d.customer.phone || d.notes;
+    return d.lines.length || d.customer.name || d.customer.phone || d.customer.email || d.notes;
   }
 
-  function saveTicket(silent) {
+  // Ticket numbers come from the date and time, since tickets are not stored.
+  function ticketNumber(date) {
+    function p(n) { return String(n).padStart(2, '0'); }
+    return String(date.getFullYear()).slice(2) + p(date.getMonth() + 1) + p(date.getDate()) + '-' +
+      p(date.getHours()) + p(date.getMinutes()) + p(date.getSeconds());
+  }
+
+  function printTicket() {
     var d = S.draft;
-    if (!d.lines.length) { toast('Add at least one item first'); return null; }
-    var now = new Date().toISOString();
-    var c = compute(d);
-    if (!d.id) {
-      d.id = uid('t');
-      d.number = (S.settings.invoicePrefix || '') + S.settings.nextInvoice;
-      d.createdAt = now;
-      S.settings.nextInvoice = Number(S.settings.nextInvoice) + 1;
-      saveSettings();
-    }
-    d.updatedAt = now;
-    var record = clone(d);
-    record.snapshot = { computed: c, taxRate: S.settings.taxRate, footer: S.settings.footer };
-    var i = S.tickets.findIndex(function (t) { return t.id === d.id; });
-    if (i >= 0) S.tickets[i] = record; else S.tickets.unshift(record);
-    saveTickets();
-    saveDraft();
-    if (!silent) toast('Saved ' + d.number);
-    if (S.view === 'ticket') renderTicketView();
-    return record;
-  }
-
-  function printRecord(record) {
-    document.getElementById('print-area').innerHTML = invoiceHTML(record, record.snapshot.computed, record.snapshot.footer);
+    if (!d.lines.length) { toast('Add at least one item first'); return; }
+    var now = new Date();
+    var t = { number: ticketNumber(now), createdAt: now.toISOString(), customer: d.customer, notes: d.notes };
+    document.getElementById('print-area').innerHTML = invoiceHTML(t, compute(), S.settings.footer);
     var img = document.querySelector('#print-area img');
     var done = false;
     function go() { if (done) return; done = true; window.print(); }
@@ -479,60 +576,6 @@
     '</div>';
   }
 
-  // ================================================================ HISTORY
-  function renderHistory() {
-    var q = S.historyQuery.trim().toLowerCase();
-    var list = S.tickets.filter(function (t) {
-      if (!q) return true;
-      var hay = [t.number, t.customer.name, t.customer.phone, t.customer.email, t.notes].join(' ').toLowerCase();
-      return hay.indexOf(q) !== -1;
-    });
-    var total = list.reduce(function (s, t) { return s + t.snapshot.computed.total; }, 0);
-    var el = document.getElementById('view-history');
-    el.innerHTML =
-      '<div class="title-row"><div><div class="large-title">History</div><p class="subtitle" style="margin:0">' + list.length + ' ticket' + (list.length === 1 ? '' : 's') + ' · ' + money(total) + '</p></div>' +
-      '<label class="search">' + ICON.search + '<input id="historySearch" placeholder="Name, phone, invoice #" value="' + esc(S.historyQuery) + '"></label></div>' +
-      (list.length ?
-        '<div class="group">' + list.map(function (t) {
-          return '<div class="row tap list-row" data-action="open-ticket" data-id="' + esc(t.id) + '">' +
-            '<span class="mono hide-sm">' + esc(t.number) + '</span>' +
-            '<span><strong>' + esc(t.customer.name || 'No name') + '</strong><br><span class="muted small">' + esc(t.customer.phone || '') + ' · ' + t.lines.length + ' line' + (t.lines.length === 1 ? '' : 's') + '</span></span>' +
-            '<span class="date">' + esc(fmtDateTime(t.updatedAt || t.createdAt)) + '</span>' +
-            '<span class="money">' + money(t.snapshot.computed.total) + '</span>' + ICON.chev +
-          '</div>';
-        }).join('') + '</div>'
-        : '<div class="empty">' + (q ? 'No tickets match.' : 'Saved tickets will appear here.') + '</div>');
-  }
-
-  function openTicketSheet(id) {
-    var t = S.tickets.find(function (x) { return x.id === id; });
-    if (!t) return;
-    var c = t.snapshot.computed;
-    openSheet({
-      title: t.number,
-      edit: {},
-      renderBody: function () {
-        return '<div class="group-title">Customer</div><div class="group">' +
-            '<div class="row"><span class="lbl">Name</span><span class="end">' + esc(t.customer.name || '—') + '</span></div>' +
-            '<div class="row"><span class="lbl">Phone</span><span class="end">' + esc(t.customer.phone || '—') + '</span></div>' +
-            '<div class="row"><span class="lbl">Date</span><span class="end">' + esc(fmtDateTime(t.createdAt)) + '</span></div>' +
-          '</div>' +
-          '<div class="group-title">Items</div><div class="group">' + c.rows.map(function (r) {
-            return '<div class="row"><span class="grow">' + (r.isLinked ? '↳ ' : '') + esc(r.name) + (r.size ? ' <span class="muted small">' + esc(r.size) + '</span>' : '') + '<br><span class="muted small">' + rowDetail(r) + '</span></span><span class="end" style="color:var(--label)">' + money(r.total) + '</span></div>';
-          }).join('') +
-            '<div class="row"><span class="grow muted">Tax (' + c.taxRate + '%)</span><span class="end">' + money(c.tax) + '</span></div>' +
-            '<div class="row"><strong class="grow">Total</strong><strong>' + money(c.total) + '</strong></div>' +
-          '</div>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:20px">' +
-            '<button class="btn lg" data-action="edit-ticket" data-id="' + esc(t.id) + '">Open & Edit</button>' +
-            '<button class="btn primary lg" data-action="reprint" data-id="' + esc(t.id) + '">' + ICON.print + 'Reprint</button>' +
-          '</div>' +
-          '<button class="btn danger lg" style="width:100%;margin-top:8px" data-action="delete-ticket" data-id="' + esc(t.id) + '">Delete Ticket</button>' +
-          '<p class="group-foot" style="margin-top:12px">Reprint uses the prices saved with this ticket. “Open & Edit” recalculates with the current catalog.</p>';
-      }
-    });
-  }
-
   // ================================================================ CATALOG
   function renderCatalog() {
     var cats = S.catalog.categories;
@@ -541,8 +584,9 @@
     var items = cat ? itemsIn(cat.id, true) : [];
     var el = document.getElementById('view-catalog');
     el.innerHTML =
-      '<div class="title-row"><div><div class="large-title">Catalog</div><p class="subtitle" style="margin:0">Add grips, sizes, shafts and labor. Changes apply to new tickets immediately.</p></div>' +
+      '<div class="title-row"><div><div class="large-title">Catalog</div><p class="subtitle" style="margin:0">Add grips, sizes, shafts and labor. Saved online and shared by every device.</p></div>' +
       '<div class="actions"><button class="btn" data-action="export-catalog">Export</button><button class="btn" data-action="import-catalog">Import</button><button class="btn danger" data-action="reset-catalog">Reset to Defaults</button></div></div>' +
+      lockBar('catalog changes') +
       '<div class="split">' +
         '<div>' +
           '<div class="group-title">Categories</div>' +
@@ -609,9 +653,7 @@
         if (existing) Object.keys(existing).forEach(function (k) { delete existing[k]; });
         if (existing) Object.assign(existing, out); else S.catalog.items.push(out);
         S.catalogCat = out.categoryId;
-        saveCatalog();
-        render();
-        toast('Saved ' + out.name);
+        persist('Saved ' + out.name);
       },
       renderBody: function (e) {
         var catOptions = S.catalog.categories.map(function (c) {
@@ -678,8 +720,7 @@
           S.catalog.categories.push(c);
           S.catalogCat = c.id;
         }
-        saveCatalog();
-        render();
+        persist('Saved ' + e.name.trim());
       },
       renderBody: function (e) {
         var h = '<div class="group-title">Category</div><div class="group">' +
@@ -702,24 +743,27 @@
   }
 
   // ================================================================ SETTINGS
+  var settingsEdit = null; // working copy until "Save Settings"
+
   function renderSettings() {
-    var s = S.settings;
+    if (!settingsEdit) settingsEdit = clone(S.settings);
+    var s = settingsEdit;
+    var locked = !Remote.pin || !canEdit();
+    var dis = locked ? ' disabled' : '';
     document.getElementById('view-settings').innerHTML =
-      '<div class="large-title">Settings</div><p class="subtitle">Stored on this computer’s browser. Use backups to move data between computers.</p>' +
-      '<div style="max-width:640px">' +
+      '<div class="large-title">Settings</div><p class="subtitle">Saved online with the catalog and shared by every device. Tickets are never stored.</p>' +
+      '<div style="max-width:640px">' + lockBar('settings') +
       '<div class="group-title">Sales tax</div><div class="group">' +
-        '<div class="row"><label>Tax rate (%)</label><input type="number" step="0.001" data-bind="settings:taxRate" data-type="number" value="' + esc(s.taxRate) + '"></div>' +
+        '<div class="row"><label>Tax rate (%)</label><input type="number" step="0.001" min="0" max="25" data-bind="settings:taxRate" data-type="number" value="' + esc(s.taxRate) + '"' + dis + '></div>' +
       '</div><div class="group-foot">Clark County, NV combined rate is 8.375% (4.6% state + 3.775% local). Tax is applied only to items marked Taxable (parts); separately stated repair and installation labor is not taxable in Nevada.</div>' +
-      '<div class="group-title">Invoices</div><div class="group">' +
-        '<div class="row"><label>Number prefix</label><input data-bind="settings:invoicePrefix" value="' + esc(s.invoicePrefix) + '"></div>' +
-        '<div class="row"><label>Next number</label><input type="number" step="1" data-bind="settings:nextInvoice" data-type="number" value="' + esc(s.nextInvoice) + '"></div>' +
-        '<div class="row"><label>Footer message</label><input data-bind="settings:footer" value="' + esc(s.footer) + '"></div>' +
+      '<div class="group-title">Printed invoice</div><div class="group">' +
+        '<div class="row"><label>Footer message</label><input data-bind="settings:footer" value="' + esc(s.footer) + '"' + dis + '></div>' +
       '</div>' +
+      (locked ? '' : '<div style="margin-top:14px;display:flex;gap:8px"><button class="btn primary lg" data-action="save-settings">Save Settings</button><button class="btn lg" data-action="revert-settings">Revert</button></div>') +
       '<div class="group-title">Backup</div><div class="group">' +
-        '<div class="row tap" data-action="export-all"><span class="grow">Export full backup</span><span class="end small">Catalog, settings & tickets' + ICON.chev + '</span></div>' +
+        '<div class="row tap" data-action="export-all"><span class="grow">Download backup</span><span class="end small">Catalog & settings' + ICON.chev + '</span></div>' +
         '<div class="row tap" data-action="import-all"><span class="grow">Restore from backup…</span>' + ICON.chev + '</div>' +
-        '<div class="row tap" data-action="clear-history" style="color:var(--red)"><span class="grow">Delete all saved tickets</span></div>' +
-      '</div><div class="group-foot">Clearing the browser’s site data will erase everything. Export a backup regularly.</div>' +
+      '</div><div class="group-foot">The catalog is stored online. A downloaded backup lets you restore it if something is deleted by mistake.</div>' +
       '</div>';
   }
 
@@ -766,14 +810,12 @@
     var target = spec[0], path = spec[1];
     var v = el.type === 'checkbox' ? el.checked : el.value;
     if (el.dataset.type === 'number') v = num(v);
-    if (target === 'draft') { setPath(S.draft, path, v); saveDraft(); }
+    if (target === 'draft') { setPath(S.draft, path, v); }
     else if (target === 'edit' && sheet) {
       setPath(sheet.edit, path, v);
       if (el.dataset.rerender) refreshSheet();
-    } else if (target === 'settings') {
-      setPath(S.settings, path, v);
-      saveSettings();
-      document.getElementById('sideMeta').textContent = 'Sales tax ' + S.settings.taxRate + '% · ' + S.tickets.length + ' saved tickets';
+    } else if (target === 'settings' && settingsEdit) {
+      setPath(settingsEdit, path, v);
     }
   }
 
@@ -782,12 +824,6 @@
     if (el.dataset && el.dataset.bind && el.type !== 'checkbox' && el.tagName !== 'SELECT') onBind(el);
     if (el.id === 'posSearch') {
       S.search = el.value; renderChips(); renderGrid();
-    }
-    if (el.id === 'historySearch') {
-      S.historyQuery = el.value;
-      var pos = el.selectionStart;
-      renderHistory();
-      var n = document.getElementById('historySearch'); n.focus(); n.setSelectionRange(pos, pos);
     }
   });
   document.addEventListener('change', function (ev) {
@@ -836,46 +872,21 @@
       closeSheet(); draftChanged();
     },
     'new-ticket': function () {
-      var d = S.draft;
-      var unsaved = hasContent(d) && (!d.id || JSON.stringify(stripMeta(d)) !== JSON.stringify(stripMeta(S.tickets.find(function (t) { return t.id === d.id; }) || {})));
-      if (unsaved && !confirm('Discard the unsaved changes on this ticket?')) return;
-      S.draft = newDraft(); saveDraft(); renderTicketView();
+      if (hasContent(S.draft) && !confirm('Clear this ticket and start a new one?')) return;
+      S.draft = newDraft(); renderTicketView();
     },
-    'save-ticket': function () { saveTicket(); },
-    'print-ticket': function () {
-      var rec = saveTicket(true);
-      if (rec) printRecord(rec);
-    },
-    'open-ticket': function (el) { openTicketSheet(el.dataset.id); },
-    'reprint': function (el) {
-      var t = S.tickets.find(function (x) { return x.id === el.dataset.id; });
-      closeSheet(); printRecord(t);
-    },
-    'edit-ticket': function (el) {
-      if (hasContent(S.draft) && !S.draft.id && !confirm('Replace the unsaved ticket currently in progress?')) return;
-      var t = S.tickets.find(function (x) { return x.id === el.dataset.id; });
-      S.draft = stripSnapshot(clone(t));
-      saveDraft(); closeSheet(); go('ticket');
-      var now = compute().total;
-      if (now !== t.snapshot.computed.total) toast('Note: current catalog prices changed the total');
-    },
-    'delete-ticket': function (el) {
-      if (!confirm('Delete this ticket permanently?')) return;
-      S.tickets = S.tickets.filter(function (t) { return t.id !== el.dataset.id; });
-      if (S.draft.id === el.dataset.id) { S.draft.id = null; S.draft.number = null; S.draft.createdAt = null; saveDraft(); }
-      saveTickets(); closeSheet(); render();
-    },
+    'print-ticket': function () { printTicket(); },
 
     'catalog-cat': function (el) { S.catalogCat = el.dataset.id; renderCatalog(); },
-    'add-category': function () { openCategoryEditor(null); },
-    'edit-category': function (el) { openCategoryEditor(el.dataset.id); },
+    'add-category': function () { requireUnlock(function () { openCategoryEditor(null); }); },
+    'edit-category': function (el) { requireUnlock(function () { openCategoryEditor(el.dataset.id); }); },
     'move-cat': function (el) {
       var cats = S.catalog.categories;
       var i = cats.findIndex(function (c) { return c.id === el.dataset.id; });
       var j = i + Number(el.dataset.d);
       if (j < 0 || j >= cats.length) return;
       var tmp = cats[i]; cats[i] = cats[j]; cats[j] = tmp;
-      saveCatalog(); closeSheet(); render();
+      closeSheet(); persist('Order saved');
     },
     'delete-category': function (el) {
       var id = el.dataset.id;
@@ -883,19 +894,18 @@
       if (n) { toast('Move or delete its ' + n + ' item' + (n === 1 ? '' : 's') + ' first'); return; }
       if (!confirm('Delete this category?')) return;
       S.catalog.categories = S.catalog.categories.filter(function (c) { return c.id !== id; });
-      saveCatalog(); closeSheet(); render();
+      closeSheet(); persist('Category deleted');
     },
-    'add-item-catalog': function () { openItemEditor(null); },
-    'edit-item': function (el) { openItemEditor(el.dataset.id); },
+    'add-item-catalog': function () { requireUnlock(function () { openItemEditor(null); }); },
+    'edit-item': function (el) { requireUnlock(function () { openItemEditor(el.dataset.id); }); },
     'delete-item': function (el) {
       var id = el.dataset.id;
       var users = S.catalog.items.filter(function (i) { return (i.links || []).some(function (l) { return l.itemId === id; }); });
-      var msg = 'Delete this item?' + (users.length ? '\n\nIt is linked from ' + users.length + ' other item(s); those links will be removed.' : '') +
-        '\n\nSaved tickets keep their printed prices.';
+      var msg = 'Delete this item?' + (users.length ? '\n\nIt is linked from ' + users.length + ' other item(s); those links will be removed.' : '');
       if (!confirm(msg)) return;
       S.catalog.items = S.catalog.items.filter(function (i) { return i.id !== id; });
       users.forEach(function (u) { u.links = u.links.filter(function (l) { return l.itemId !== id; }); });
-      saveCatalog(); closeSheet(); render();
+      closeSheet(); persist('Item deleted');
     },
     'add-size': function () { sheet.edit.sizes.push({ name: '', price: '' }); refreshSheet(); },
     'std-sizes': function () {
@@ -907,33 +917,48 @@
     'rm-link': function (el) { sheet.edit.links.splice(Number(el.dataset.i), 1); refreshSheet(); },
     'export-catalog': function () { download('robogolf-catalog-' + stamp() + '.json', S.catalog); },
     'import-catalog': function () {
-      pickFile(function (data) {
-        var c = data.catalog || data;
-        if (!validCatalog(c)) { toast('That file does not contain a catalog'); return; }
-        if (!confirm('Replace the current catalog with the imported one?')) return;
-        S.catalog = c; saveCatalog(); render(); toast('Catalog imported');
+      requireUnlock(function () {
+        pickFile(function (data) {
+          var c = data.catalog || data;
+          if (!validCatalog(c)) { toast('That file does not contain a catalog'); return; }
+          if (!confirm('Replace the online catalog with the imported one? Every device will see the change.')) return;
+          S.catalog = c; persist('Catalog imported');
+        });
       });
     },
     'reset-catalog': function () {
-      if (!confirm('Reset the catalog to the original price list? Your added items will be removed. (Export first if unsure.)')) return;
-      S.catalog = clone(window.DEFAULT_CATALOG); saveCatalog(); render(); toast('Catalog reset');
-    },
-    'export-all': function () {
-      download('robogolf-backup-' + stamp() + '.json', { app: 'robogolf-repair-pos', version: 1, exportedAt: new Date().toISOString(), catalog: S.catalog, settings: S.settings, tickets: S.tickets });
-    },
-    'import-all': function () {
-      pickFile(function (data) {
-        if (!data || !validCatalog(data.catalog) || !Array.isArray(data.tickets)) { toast('That file is not a full backup'); return; }
-        if (!confirm('Restore this backup? It replaces the catalog, settings and all ' + S.tickets.length + ' saved tickets on this computer.')) return;
-        S.catalog = data.catalog; S.tickets = data.tickets;
-        S.settings = Object.assign(clone(window.DEFAULT_SETTINGS), data.settings || {});
-        saveCatalog(); saveTickets(); saveSettings(); render(); toast('Backup restored');
+      requireUnlock(function () {
+        if (!confirm('Reset the catalog to the original price list? Added items will be removed for every device. (Export first if unsure.)')) return;
+        S.catalog = clone(window.DEFAULT_CATALOG); persist('Catalog reset');
       });
     },
-    'clear-history': function () {
-      if (!confirm('Delete all ' + S.tickets.length + ' saved tickets? This cannot be undone.')) return;
-      S.tickets = []; saveTickets(); render();
+    'export-all': function () {
+      download('robogolf-backup-' + stamp() + '.json', { app: 'robogolf-repair-pos', version: 2, exportedAt: new Date().toISOString(), catalog: S.catalog, settings: S.settings });
     },
+    'import-all': function () {
+      requireUnlock(function () {
+        pickFile(function (data) {
+          if (!data || !validCatalog(data.catalog)) { toast('That file is not a backup'); return; }
+          if (!confirm('Restore this backup? It replaces the online catalog and settings for every device.')) return;
+          S.catalog = data.catalog;
+          S.settings = Object.assign(clone(window.DEFAULT_SETTINGS), data.settings || {});
+          settingsEdit = null;
+          persist('Backup restored');
+        });
+      });
+    },
+    'save-settings': function () {
+      var active = document.activeElement;
+      if (active && active.dataset && active.dataset.bind) onBind(active);
+      var rate = Number(settingsEdit.taxRate);
+      if (!isFinite(rate) || rate < 0 || rate > 25) { toast('Tax rate must be between 0 and 25'); return; }
+      S.settings = clone(settingsEdit);
+      settingsEdit = null;
+      persist('Settings saved');
+    },
+    'revert-settings': function () { settingsEdit = null; renderSettings(); },
+    'unlock': function () { requireUnlock(function () { settingsEdit = null; render(); }); },
+    'lock': function (el, ev) { ev.preventDefault(); Remote.pin = null; settingsEdit = null; render(); toast('Editing locked'); },
 
     'sheet-cancel': function () { closeSheet(); },
     'sheet-backdrop': function (el, ev) { if (ev.target === el) closeSheet(); },
@@ -946,10 +971,6 @@
     }
   };
 
-  function stripSnapshot(t) { delete t.snapshot; return t; }
-  function stripMeta(t) {
-    return { customer: t.customer, notes: t.notes, lines: t.lines };
-  }
 
   document.addEventListener('click', function (ev) {
     var nav = ev.target.closest('#nav button');
@@ -963,14 +984,31 @@
   // Keep the printed invoice light and complete even if printed with Ctrl+P.
   window.addEventListener('beforeprint', function () {
     if (!document.getElementById('print-area').innerHTML && S.draft.lines.length) {
-      var c = compute();
-      document.getElementById('print-area').innerHTML = invoiceHTML(S.draft, c, S.settings.footer);
+      var now = new Date();
+      var t = { number: ticketNumber(now), createdAt: now.toISOString(), customer: S.draft.customer, notes: S.draft.notes };
+      document.getElementById('print-area').innerHTML = invoiceHTML(t, compute(), S.settings.footer);
     }
   });
+
+  // Tickets are not saved, so warn before closing/reloading with one in progress.
+  window.addEventListener('beforeunload', function (ev) {
+    if (S.draft.lines.length) { ev.preventDefault(); ev.returnValue = ''; }
+  });
+
+  // Pick up catalog changes made on other devices when this window regains focus.
+  var lastSync = 0;
+  function refreshIfIdle() {
+    if (document.hidden || sheet || Remote.saving || Remote.mode === 'offline' && location.protocol === 'file:') return;
+    if (Date.now() - lastSync < 15000) return;
+    lastSync = Date.now();
+    loadRemote(true);
+  }
+  window.addEventListener('focus', refreshIfIdle);
+  document.addEventListener('visibilitychange', refreshIfIdle);
   window.addEventListener('afterprint', function () { document.getElementById('print-area').innerHTML = ''; });
 
   // ---------------------------------------------------------------- boot
-  if (!validCatalog(S.catalog)) S.catalog = clone(window.DEFAULT_CATALOG);
-  if (!S.draft || !Array.isArray(S.draft.lines)) S.draft = newDraft();
   render();
+  lastSync = Date.now();
+  loadRemote();
 })();
